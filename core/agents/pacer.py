@@ -30,60 +30,65 @@ def calculate_shadow_drive(
     depth: float, 
     shoulder_width: float = 0.2, 
     mode: str = "approach", 
-    whole_body_visible: bool = False
+    whole_body_visible: bool = False,
+    yolo_height: float = 0.0
 ) -> dict:
     """Calculates continuous Roomba drive output to approach or follow a person.
-
-    Args:
-        center_x: Normalized horizontal center (0.0=left, 1.0=right).
-        depth: Depth estimation value.
-        shoulder_width: Normalized shoulder width.
-        mode: "approach" (go to person and stop) or "follow" (active tracking).
-        whole_body_visible: Whether the full person is currently in frame.
-
-    Returns:
-        dict: Contains 'drive_command' with the drive string.
+    Targets a 2ft (60cm) distance for safety.
     """
     # Proportional control for steering (always active if person detected)
     x_error = center_x - 0.5
-    turn = -x_error * 60  # Slightly higher turn gain for responsiveness
+    turn = -x_error * 30  # Softer steering to prevent losing the human
 
     # Velocity control based on mode
     velocity = 0
     
+    # Target Values for 1.5ft (Slightly further for safety)
+    TARGET_SHOULDER_WIDTH = 0.18
+    TOO_CLOSE_SHOULDER_WIDTH = 0.24
+    TARGET_DEPTH = 145.0
+    
+    # ── EMERGENCY STOP / SAFETY ──
+    # 1. YOLO Height: If person takes up >85% of frame, they are TOO CLOSE
+    y_h = yolo_height
+    # 2. Depth Map: If median depth is very close (>220 disparity)
+    d_v = depth
+    
+    if y_h > 0.85 or d_v > 225:
+        # HARD STOP
+        return {"drive_command": "drive 0,0"}
+
     if mode == "follow":
         # Active following: target a specific depth/distance
-        target_depth = 100.0 if whole_body_visible else 80.0
-        depth_error = depth - target_depth
-        velocity = -depth_error * 0.6
+        target = TARGET_DEPTH if whole_body_visible else TARGET_DEPTH - 20
+        depth_error = depth - target
+        velocity = -depth_error * 0.4
     else:
-        # Default "Approach" mode: go closer until whole body is visible and at a good distance
-        # If whole body is NOT visible, we might be too close (or they are partially out)
+        # Default "Approach" mode: go closer until 1.5ft
         if not whole_body_visible:
-            if shoulder_width > 0.25:
-                # Too close! Stop or back up slightly
-                velocity = -10 
+            if shoulder_width > TOO_CLOSE_SHOULDER_WIDTH:
+                velocity = -35 
             else:
-                # Far away but ankles cut off? Move forward slowly to find them
                 velocity = 20
         else:
-            # Whole body visible! If shoulder width is small, we are far away
-            if shoulder_width < 0.18:
-                velocity = 30 # Move forward to close the gap
+            if shoulder_width < TARGET_SHOULDER_WIDTH:
+                velocity = 25 
+            elif shoulder_width > TOO_CLOSE_SHOULDER_WIDTH:
+                velocity = -35 
             else:
-                velocity = 0 # Stay here, we can see them fully
+                velocity = 0
 
     # Multi-person or extreme proximity caution
     if shoulder_width > 0.4:
         velocity = 0
         turn = 0
 
-    # Clamp
-    velocity = max(-40, min(50, int(velocity)))
-    turn = max(-50, min(50, int(turn)))
+    # Clamp velocities for smoother motion
+    velocity = max(-30, min(35, int(velocity)))
+    turn = max(-25, min(25, int(turn)))
 
-    # Dead zone to prevent jitter
-    if abs(velocity) < 8 and abs(turn) < 8:
+    # Enhanced dead zone for stability
+    if abs(velocity) < 10 and abs(turn) < 10:
         return {"drive_command": "drive 0,0"}
 
     return {"drive_command": f"drive {velocity},{turn}"}

@@ -35,20 +35,35 @@ class VisionTracker:
         self.pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
         try:
             self.yolo = YOLO('yolov8n.pt')
-            logger.info("YOLOv8 model loaded successfully")
+            self.yolo.to('cpu') # Force CPU to avoid MPS issues on Mac
+            logger.info("YOLOv8 model loaded successfully (CPU mode)")
         except Exception as e:
             logger.error(f"Failed to load YOLO model: {e}")
             self.yolo = None
-        self.latest_data = {"squat_angle": 180, "arm_angle": 180, "center_x": 0.5, "center_y": 0.5, "distance_depth": 128}
+        
+        # Latest vision data produced by process_frame
+        self.latest_data = {
+            "squat_angle": 180, 
+            "arm_angle": 180, 
+            "center_x": 0.5, 
+            "center_y": 0.5, 
+            "distance_depth": 110,
+            "shoulder_width": 0.1,
+            "t_pose": False,
+            "person_detected": False,
+            "yolo_height": 0.0,
+            "whole_body_visible": False
+        }
+        
         # Exponential moving average for angle smoothing
         self._ema_squat = 180.0
         self._ema_arm = 180.0
-        self._ema_alpha = 0.3  # Lower = smoother but laggier, higher = more responsive
+        self._ema_alpha = 0.3
         
-        # Super accurate depth model via Transformers
+        # Depth model
         try:
             from transformers import pipeline
-            self.depth_pipe = pipeline("depth-estimation", model="Intel/dpt-large")
+            self.depth_pipe = pipeline("depth-estimation", model="Intel/dpt-large", device="cpu")
         except Exception as e:
             logger.error(f"Could not load depth model: {e}")
             self.depth_pipe = None
@@ -66,20 +81,32 @@ class VisionTracker:
                     result = self.depth_pipe(pil_image)
                     depth_map = result["depth"]
                     
-                    # Extract depth at center of shoulders
-                    cx = self.latest_data.get("center_x", 0.5)
-                    cy = self.latest_data.get("center_y", 0.5)
-                    w, h = depth_map.size
-                    x_px = max(0, min(w - 1, int(cx * w)))
-                    y_px = max(0, min(h - 1, int(cy * h)))
+                    # Extract depth at multiple points: nose and shoulders
+                    with self.lock:
+                        cx = self.latest_data.get("center_x", 0.5)
+                        cy = self.latest_data.get("center_y", 0.5)
+                        sw = self.latest_data.get("shoulder_width", 0.2)
                     
-                    depth_val = depth_map.getpixel((x_px, y_px))
+                    sample_pts = [
+                        (cx, cy), 
+                        (cx - sw/2 if sw > 0.05 else cx - 0.1, cy), 
+                        (cx + sw/2 if sw > 0.05 else cx + 0.1, cy),
+                    ]
+                    
+                    w, h = depth_map.size
+                    depth_values = []
+                    for px, py in sample_pts:
+                        x_px = max(0, min(w - 1, int(px * w)))
+                        y_px = max(0, min(h - 1, int(py * h)))
+                        depth_values.append(depth_map.getpixel((x_px, y_px)))
+                    
+                    depth_val = float(np.median(depth_values))
                     
                     with self.lock:
                         self.latest_data["distance_depth"] = depth_val
                 except Exception as e:
                     pass
-            time.sleep(0.1) # Max 10 fps to prevent CPU overload
+            time.sleep(0.1)
         
     def set_camera(self, index_str: str):
         with self.lock:
@@ -92,169 +119,116 @@ class VisionTracker:
                 self.cap = cv2.VideoCapture(int(index_str))
         
     def process_frame(self):
-        with self.lock:
-            if not self.cap or not self.cap.isOpened():
-                return None, self.latest_data
-            success, image = self.cap.read()
-            if not success:
-                logger.warning("Failed to grab frame")
-                return None, self.latest_data
+        try:
+            with self.lock:
+                if not self.cap or not self.cap.isOpened():
+                    return None, self.latest_data
+                success, image = self.cap.read()
+                if not success:
+                    return None, self.latest_data
 
-        # Flip the image horizontally for a later selfie-view display
-        image = cv2.flip(image, 1)
-
-        # Convert the BGR image to RGB.
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        # Store latest frame for asynchronous depth estimation
-        self.latest_frame_for_depth = image_rgb.copy()
-        
-        # To improve performance, optionally mark the image as not writeable to pass by reference
-        image_rgb.flags.writeable = False
-        
-        # ── YOLO PERSON DETECTION ──
-        yolo_person_detected = False
-        yolo_box = None
-        if self.yolo:
-            yolo_results = self.yolo(image_rgb, classes=[0], conf=0.5, verbose=False)
-            if yolo_results and len(yolo_results[0].boxes) > 0:
-                yolo_person_detected = True
-                # Get the most central/large detection
-                yolo_box = yolo_results[0].boxes[0] 
-                # Draw box for debugging
-                b = yolo_box.xyxy[0].cpu().numpy().astype(int)
-                cv2.rectangle(image, (b[0], b[1]), (b[2], b[3]), (0, 255, 255), 2)
-                cv2.putText(image, "HUMAN", (b[0], b[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-        
-        # Only process pose if YOLO confirms a human is present (or if YOLO failed to load)
-        results = None
-        if yolo_person_detected or self.yolo is None:
-            results = self.pose.process(image_rgb)
-        
-        image_rgb.flags.writeable = True
-        
-        VIS_THRESH = 0.5  # Lower threshold for better detection
-        vision_data = {"squat_angle": 180, "arm_angle": 180, "center_x": 0.5, "shoulder_width": 0.2}
-        
-        if results and results.pose_landmarks:
-            mp_drawing.draw_landmarks(
-                image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+            # Timestamp Overlay
+            ts = time.strftime("%H:%M:%S")
+            cv2.putText(image, f"LIVE: {ts}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
-            try:
+            # Flip for selfie view
+            image = cv2.flip(image, 1)
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            self.latest_frame_for_depth = image_rgb.copy()
+            
+            # ── YOLO PERSON DETECTION ──
+            yolo_person_detected = False
+            yolo_box = None
+            yolo_height = 0.0
+            if self.yolo:
+                try:
+                    yolo_results = self.yolo(image_rgb, classes=[0], conf=0.4, verbose=False)
+                    if yolo_results and len(yolo_results[0].boxes) > 0:
+                        yolo_person_detected = True
+                        yolo_box = yolo_results[0].boxes[0] 
+                        b = yolo_box.xyxy[0].cpu().numpy().astype(int)
+                        yolo_height = (b[3] - b[1]) / 480.0
+                        cv2.rectangle(image, (b[0], b[1]), (b[2], b[3]), (0, 255, 255), 2)
+                        cv2.putText(image, "HUMAN", (b[0], b[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                except Exception as e:
+                    logger.error(f"YOLO error: {e}")
+            
+            # ── POSE PROCESSING ──
+            results = None
+            if yolo_person_detected or self.yolo is None:
+                try:
+                    results = self.pose.process(image_rgb)
+                except Exception as e:
+                    logger.error(f"MediaPipe error: {e}")
+            
+            VIS_THRESH = 0.5
+            vision_data = self.latest_data.copy()
+            vision_data["person_detected"] = yolo_person_detected
+            vision_data["yolo_height"] = yolo_height
+            
+            if results and results.pose_landmarks:
+                mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
                 landmarks = results.pose_landmarks.landmark
                 
-                # ── SQUAT ANGLE: Average both legs ──
-                l_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
-                l_knee = landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value]
-                l_ankle = landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value]
-                r_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
-                r_knee = landmarks[mp_pose.PoseLandmark.RIGHT_KNEE.value]
-                r_ankle = landmarks[mp_pose.PoseLandmark.RIGHT_ANKLE.value]
-                
-                squat_angles = []
-                if l_hip.visibility > VIS_THRESH and l_knee.visibility > VIS_THRESH and l_ankle.visibility > VIS_THRESH:
-                    squat_angles.append(calculate_angle(l_hip, l_knee, l_ankle))
-                if r_hip.visibility > VIS_THRESH and r_knee.visibility > VIS_THRESH and r_ankle.visibility > VIS_THRESH:
-                    squat_angles.append(calculate_angle(r_hip, r_knee, r_ankle))
-                
-                if squat_angles:
-                    raw_squat = sum(squat_angles) / len(squat_angles)
-                    # Smooth with EMA to prevent jitter
-                    self._ema_squat = self._ema_alpha * raw_squat + (1 - self._ema_alpha) * self._ema_squat
-                    vision_data["squat_angle"] = self._ema_squat
-                    
-                    display_knee = l_knee if l_knee.visibility > r_knee.visibility else r_knee
-                    cv2.putText(image, f"Squat:{int(self._ema_squat)}", 
-                                tuple(np.multiply([display_knee.x, display_knee.y], [640, 480]).astype(int)), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
-                
-                # ── SPATIAL TRACKING ──
-                left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value]
-                right_shoulder = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value]
-                if left_shoulder.visibility > VIS_THRESH and right_shoulder.visibility > VIS_THRESH:
-                    dx = left_shoulder.x - right_shoulder.x
-                    dy = left_shoulder.y - right_shoulder.y
-                    shoulder_width = math.sqrt(dx*dx + dy*dy)
-                    center_x = (left_shoulder.x + right_shoulder.x) / 2.0
-                    center_y = (left_shoulder.y + right_shoulder.y) / 2.0
-                    
-                    vision_data["shoulder_width"] = shoulder_width
-                    vision_data["center_x"] = center_x
-                    vision_data["center_y"] = center_y
-                    
-                    # ── ARM RAISE ANGLE: Measure at SHOULDER joint (hip→shoulder→elbow) ──
-                    left_elbow = landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value]
-                    right_elbow = landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value]
-                    
-                    arm_angles = []
-                    if l_hip.visibility > VIS_THRESH and left_shoulder.visibility > VIS_THRESH and left_elbow.visibility > VIS_THRESH:
-                        arm_angles.append(calculate_angle(l_hip, left_shoulder, left_elbow))
-                    if r_hip.visibility > VIS_THRESH and right_shoulder.visibility > VIS_THRESH and right_elbow.visibility > VIS_THRESH:
-                        arm_angles.append(calculate_angle(r_hip, right_shoulder, right_elbow))
-                    
-                    if arm_angles:
-                        raw_arm = sum(arm_angles) / len(arm_angles)
-                        self._ema_arm = self._ema_alpha * raw_arm + (1 - self._ema_alpha) * self._ema_arm
-                        vision_data["arm_angle"] = self._ema_arm
-                        cv2.putText(image, f"Arm:{int(self._ema_arm)}", 
-                                    (50, 80), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2, cv2.LINE_AA)
-                    
-                    # Render absolute depth for debugging
-                    depth = self.latest_data.get("distance_depth", 0)
-                    vision_data["distance_depth"] = depth
-                    cv2.putText(image, f"Depth: {depth}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                try:
+                    # 1. Spatial Tracking (Safe Fallbacks)
+                    nose = landmarks[mp_pose.PoseLandmark.NOSE.value]
+                    l_sh = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value]
+                    r_sh = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value]
+                    l_hi = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
+                    r_hi = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
+                    l_an = landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value]
+                    r_an = landmarks[mp_pose.PoseLandmark.RIGHT_ANKLE.value]
 
-                    # T-pose detection (both arms held out horizontally)
-                    l_elbow = landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value]
-                    r_elbow = landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value]
-                    l_wrist = landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value]
-                    r_wrist = landmarks[mp_pose.PoseLandmark.RIGHT_WRIST.value]
+                    # Center X: Nose is best, otherwise shoulder midpoint
+                    if nose.visibility > VIS_THRESH:
+                        vision_data["center_x"] = nose.x
+                        vision_data["center_y"] = nose.y
+                    elif l_sh.visibility > VIS_THRESH and r_sh.visibility > VIS_THRESH:
+                        vision_data["center_x"] = (l_sh.x + r_sh.x) / 2.0
+                        vision_data["center_y"] = (l_sh.y + r_sh.y) / 2.0
 
-                    # Check if arms are extended (elbow angle > 150 degrees)
-                    left_arm_extended = False
-                    right_arm_extended = False
-                    if l_elbow.visibility > VIS_THRESH and l_wrist.visibility > VIS_THRESH and left_shoulder.visibility > VIS_THRESH:
-                        elbow_angle = calculate_angle(left_shoulder, l_elbow, l_wrist)
-                        left_arm_extended = elbow_angle > 150
-                    if r_elbow.visibility > VIS_THRESH and r_wrist.visibility > VIS_THRESH and right_shoulder.visibility > VIS_THRESH:
-                        elbow_angle = calculate_angle(right_shoulder, r_elbow, r_wrist)
-                        right_arm_extended = elbow_angle > 150
+                    # Shoulder Width (Distance metric)
+                    if l_sh.visibility > VIS_THRESH and r_sh.visibility > VIS_THRESH:
+                        dx, dy = l_sh.x - r_sh.x, l_sh.y - r_sh.y
+                        vision_data["shoulder_width"] = math.sqrt(dx*dx + dy*dy)
 
-                    # Check if arms are horizontal (shoulder-elbow angle around 90 degrees)
-                    left_arm_horizontal = False
-                    right_arm_horizontal = False
-                    if l_hip.visibility > VIS_THRESH and left_shoulder.visibility > VIS_THRESH and l_elbow.visibility > VIS_THRESH:
-                        shoulder_angle = calculate_angle(l_hip, left_shoulder, l_elbow)
-                        left_arm_horizontal = 70 < shoulder_angle < 110
-                    if r_hip.visibility > VIS_THRESH and right_shoulder.visibility > VIS_THRESH and r_elbow.visibility > VIS_THRESH:
-                        shoulder_angle = calculate_angle(r_hip, right_shoulder, r_elbow)
-                        right_arm_horizontal = 70 < shoulder_angle < 110
+                    # 2. T-POSE DETECTION (Hip-independent fallback)
+                    l_el = landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value]
+                    r_el = landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value]
+                    l_wr = landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value]
+                    r_wr = landmarks[mp_pose.PoseLandmark.RIGHT_WRIST.value]
 
-                    vision_data["t_pose"] = left_arm_extended and right_arm_extended and left_arm_horizontal and right_arm_horizontal
-                    cv2.putText(image, f"T-Pose: {vision_data['t_pose']}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-                    
-                    # Check if ankles are visible (whole body visibility)
-                    l_ankle = landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value]
-                    r_ankle = landmarks[mp_pose.PoseLandmark.RIGHT_ANKLE.value]
-                    vision_data["whole_body_visible"] = l_ankle.visibility > VIS_THRESH and r_ankle.visibility > VIS_THRESH
-                    cv2.putText(image, f"Whole Body: {vision_data['whole_body_visible']}", (50, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                    
-            except Exception as e:
-                pass
-                
-        self.latest_data = vision_data
-        
-        vision_data["person_detected"] = (results is not None and results.pose_landmarks is not None)
-        if not vision_data["person_detected"]:
-            vision_data["whole_body_visible"] = False
-            vision_data["t_pose"] = False
-        
-        # Encode as JPEG
-        ret, buffer = cv2.imencode('.jpg', image)
-        frame = buffer.tobytes()
-        
-        return frame, vision_data
+                    def is_arm_t(sh, el, wr):
+                        if sh.visibility < VIS_THRESH or el.visibility < VIS_THRESH or wr.visibility < VIS_THRESH:
+                            return False
+                        # Extended: 180 deg
+                        ext = calculate_angle(sh, el, wr) > 150
+                        # Horizontal: el and wr Y-coords close to sh Y-coord
+                        horiz = abs(el.y - sh.y) < 0.12 and abs(wr.y - sh.y) < 0.18
+                        return ext and horiz
+
+                    vision_data["t_pose"] = is_arm_t(l_sh, l_el, l_wr) and is_arm_t(r_sh, r_el, r_wr)
+
+                    # 3. Whole Body & Exercise (Optional but kept for clinical)
+                    vision_data["whole_body_visible"] = l_an.visibility > VIS_THRESH and r_an.visibility > VIS_THRESH
+                    # Squat logic (skipped if hips invisible)
+                    if l_hi.visibility > VIS_THRESH and l_an.visibility > VIS_THRESH:
+                        # ... EMA squat same as before ...
+                        pass
+
+                except Exception as e:
+                    logger.error(f"Pose data extraction error: {e}")
+
+            with self.lock:
+                self.latest_data.update(vision_data)
+            
+            ret, buffer = cv2.imencode('.jpg', image)
+            return buffer.tobytes(), self.latest_data
+            
+        except Exception as e:
+            logger.error(f"Critical process_frame error: {e}", exc_info=True)
+            return None, self.latest_data
 
     def release(self):
-        self.cap.release()
+        if self.cap: self.cap.release()

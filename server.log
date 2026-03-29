@@ -1,0 +1,59 @@
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/pydantic/_internal/_fields.py:161: UserWarning: Field "model_version" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.cloud.aiplatform_v1 supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.cloud.aiplatform_v1.
+  warnings.warn(message, FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.cloud.aiplatform_v1beta1 supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.cloud.aiplatform_v1beta1.
+  warnings.warn(message, FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.cloud.resourcemanager_v3 supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.cloud.resourcemanager_v3.
+  warnings.warn(message, FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.cloud.aiplatform.v1.schema.predict.instance_v1 supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.cloud.aiplatform.v1.schema.predict.instance_v1.
+  warnings.warn(message, FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.cloud.aiplatform.v1.schema.predict.params_v1 supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.cloud.aiplatform.v1.schema.predict.params_v1.
+  warnings.warn(message, FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.cloud.aiplatform.v1.schema.predict.prediction_v1 supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.cloud.aiplatform.v1.schema.predict.prediction_v1.
+  warnings.warn(message, FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.cloud.aiplatform.v1.schema.trainingjob.definition_v1 supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.cloud.aiplatform.v1.schema.trainingjob.definition_v1.
+  warnings.warn(message, FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.cloud.aiplatform.v1beta1.schema.predict.instance_v1beta1 supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.cloud.aiplatform.v1beta1.schema.predict.instance_v1beta1.
+  warnings.warn(message, FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.cloud.aiplatform.v1beta1.schema.predict.params_v1beta1 supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.cloud.aiplatform.v1beta1.schema.predict.params_v1beta1.
+  warnings.warn(message, FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.cloud.aiplatform.v1beta1.schema.predict.prediction_v1beta1 supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.cloud.aiplatform.v1beta1.schema.predict.prediction_v1beta1.
+  warnings.warn(message, FutureWarning)
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.cloud.aiplatform.v1beta1.schema.trainingjob.definition_v1beta1 supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.cloud.aiplatform.v1beta1.schema.trainingjob.definition_v1beta1.
+  warnings.warn(message, FutureWarning)
+MCP requires Python 3.10 or above. Please upgrade your Python version in order to use it.
+/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/pydantic/_internal/_fields.py:161: UserWarning: Field "model_version" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+MCP requires Python 3.10 or above. Please upgrade your Python version in order to use it.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1774771637.932851 1161755 gl_context.cc:357] GL version: 2.1 (2.1 Metal - 90.5), renderer: Apple M3 Pro
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+INFO:core.vision:YOLOv8 model loaded successfully (CPU mode)
+W0000 00:00:1774771637.991749 1162151 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1774771637.999638 1162152 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+Some weights of DPTForDepthEstimation were not initialized from the model checkpoint at Intel/dpt-large and are newly initialized: ['neck.fusion_stage.layers.0.residual_layer1.convolution1.bias', 'neck.fusion_stage.layers.0.residual_layer1.convolution1.weight', 'neck.fusion_stage.layers.0.residual_layer1.convolution2.bias', 'neck.fusion_stage.layers.0.residual_layer1.convolution2.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Device set to use cpu
+WARNING:google_adk.google.adk.runners:App name mismatch detected. The runner is configured with app name "therapy_app", but the root agent was loaded from "/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/adk/agents", which implies app name "agents".
+INFO:     Started server process [62840]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51774 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51774 - "GET /video_feed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51776 - "WebSocket /ws" [accepted]
+INFO:     connection open

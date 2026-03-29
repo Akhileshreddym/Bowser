@@ -37,7 +37,7 @@ app.add_middleware(
 )
 
 # Initialize Components
-tracker = VisionTracker(camera_index="off")
+tracker = VisionTracker(camera_index=0) # Default to first camera
 
 # ADK Session & Runner for the Therapy Assistant (the only agent that needs LLM inference)
 session_service = InMemorySessionService()
@@ -195,8 +195,18 @@ def generate_video():
     last_reps = 0
     while True:
         frame_bytes, vision_data = tracker.process_frame()
+        
+        if frame_bytes is None:
+            time.sleep(0.1)
+            continue
 
-        # Call the clinical tool function directly (deterministic, no LLM needed)
+        # If session is NOT active, just stream the raw feed (with heartbeat) and skip logic
+        if not state.is_active:
+             yield (b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+             continue
+
+        # -- CLINICAL LOGIC (only when active) --
         goal = state.patient_info.get("therapy_goal", "Squats")
         new_clinical_state = analyze_pose_data(
             squat_angle=vision_data.get("squat_angle", 180),
@@ -222,8 +232,8 @@ def generate_video():
             if not state.target_locked:
                 state.target_locked = True
                 state.is_active = True
-                state.director_dialogue = "Target locked. Following me!"
-                # Trigger audio for confirmation
+                state.director_dialogue = "Target locked. I will follow you closely!"
+                # Immediate audio feedback for the lock
                 if main_loop is not None:
                      asyncio.run_coroutine_threadsafe(trigger_assistant_update(), main_loop)
         
@@ -237,7 +247,8 @@ def generate_video():
                 depth=vision_data.get("distance_depth", 128),
                 shoulder_width=vision_data.get("shoulder_width", 0.2),
                 mode=mode,
-                whole_body_visible=whole_body
+                whole_body_visible=whole_body,
+                yolo_height=vision_data.get("yolo_height", 0.0)
             )
             
             new_roomba_out = result["drive_command"]

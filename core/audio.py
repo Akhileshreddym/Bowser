@@ -24,8 +24,8 @@ def generate_bowser_audio(text: str) -> str:
         # Open router might use a distinct voice ID. For MVP we just use an ID that's close or default 'Rachel'/'Drew'
         # 'JBFqnCBcg6Bd4IY78fC7' is the ID for a known voice or we can just pass a string of a name like 'Drew' or 'Adam'
         audio_generator = client.generate(
-            # "Adam" or custom voice ID for Bowser
-            voice="pNInz6obpgDQGcFmaJgB",
+            # "Charlie" - Deep, Confident, Energetic
+            voice="IKne3meq5aSn9XLyUdCD",
             text=text,
             model="eleven_multilingual_v2"
         )
