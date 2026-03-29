@@ -212,32 +212,46 @@ def generate_video():
 
         state.clinical_state = new_clinical_state.copy()
 
-        if not state.target_locked:
-            # Wait until a user explicitly assumes the T-pose to lock target
-            if vision_data.get("t_pose"):
+        # -- AUTONOMOUS LOGIC --
+        person_detected = vision_data.get("person_detected", False)
+        t_pose = vision_data.get("t_pose", False)
+        whole_body = vision_data.get("whole_body_visible", False)
+
+        # T-Pose Lock Logic: Always update lock status if T-pose detected
+        if t_pose:
+            if not state.target_locked:
                 state.target_locked = True
                 state.is_active = True
-                state.director_dialogue = "Target locked. Following enabled."
-            else:
-                # Not locked yet: stay stopped
-                state.roomba_output = "drive 0,0"
+                state.director_dialogue = "Target locked. Following me!"
+                # Trigger audio for confirmation
                 if main_loop is not None:
-                    asyncio.run_coroutine_threadsafe(send_command(4), main_loop)
-
-        if state.target_locked and state.follow_enabled:
-            # Call the pacer tool function directly (deterministic, no LLM needed)
+                     asyncio.run_coroutine_threadsafe(trigger_assistant_update(), main_loop)
+        
+        # Drive calculation
+        if person_detected and state.follow_enabled:
+            # Determine mode based on lock status
+            mode = "follow" if state.target_locked else "approach"
+            
             result = calculate_shadow_drive(
                 center_x=vision_data.get("center_x", 0.5),
                 depth=vision_data.get("distance_depth", 128),
-                shoulder_width=vision_data.get("shoulder_width", 0.2)
+                shoulder_width=vision_data.get("shoulder_width", 0.2),
+                mode=mode,
+                whole_body_visible=whole_body
             )
+            
             new_roomba_out = result["drive_command"]
             if new_roomba_out != state.roomba_output:
                 state.roomba_output = new_roomba_out
-                # Send the command to ESP32
                 if main_loop is not None:
                     cmd = drive_string_to_command(new_roomba_out)
                     asyncio.run_coroutine_threadsafe(send_command(cmd), main_loop)
+        else:
+            # No person detected: STOP
+            if state.roomba_output != "drive 0,0":
+                state.roomba_output = "drive 0,0"
+                if main_loop is not None:
+                    asyncio.run_coroutine_threadsafe(send_command(4), main_loop)
 
         if frame_bytes is None:
             time.sleep(0.1)
@@ -267,13 +281,24 @@ async def follow_unlock():
     await send_stop()
     return {"status": "unlocked"}
 
+@app.post("/api/esp32/toggle")
+async def esp32_toggle():
+    """Toggle the Roomba's following ability without stopping the session."""
+    state.follow_enabled = not state.follow_enabled
+    if not state.follow_enabled:
+        await send_stop()
+        state.roomba_output = "drive 0,0"
+    
+    return {
+        "status": "ok", 
+        "follow_enabled": state.follow_enabled,
+        "label": "STOP" if state.follow_enabled else "RESUME"
+    }
+
 @app.post("/api/esp32/stop")
 async def esp32_stop():
-    """Emergency stop the Roomba."""
-    await send_stop()
-    state.roomba_output = "drive 0,0"
-    state.is_active = False
-    return {"status": "stopped"}
+    """Deprecated: use toggle or specific state setters."""
+    return await esp32_toggle()
 
 @app.get("/video_feed")
 def video_feed():

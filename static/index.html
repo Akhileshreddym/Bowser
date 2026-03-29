@@ -355,7 +355,8 @@
     </div>
 
     <!-- Emergency Kill Button -->
-    <button class="kill-btn" id="kill-btn" onclick="emergencyStop()" title="Emergency Stop">KILL</button>
+    <!-- Stop/Resume Toggle Button -->
+    <button class="kill-btn" id="kill-btn" onclick="toggleRobotMovement()" title="Toggle Movement">STOP</button>
 
     <!-- Hidden Audio Player -->
     <audio id="tts-player" class="hidden"></audio>
@@ -546,22 +547,42 @@
 
         connectESP32();
 
-        function emergencyStop() {
-            addLog("🛑 EMERGENCY STOP ACTIVATED", "line-err");
+        function toggleRobotMovement() {
             const btn = document.getElementById("kill-btn");
-            gsap.fromTo(btn, 
-                { boxShadow: "0 0 0 0 rgba(220,38,38,0.8)" },
-                { boxShadow: "0 0 40px 20px rgba(220,38,38,0)", duration: 0.6 }
-            );
+            const isCurrentlyStop = btn.innerText === "STOP";
             
-            // Send Stop to ESP32 directly!
-            if (esp32_ws && esp32_ws.readyState === WebSocket.OPEN) {
-                esp32_ws.send(new Uint8Array([4]));
+            if (isCurrentlyStop) {
+                addLog("🛑 PAUSING MOVEMENT", "line-err");
+                gsap.fromTo(btn, 
+                    { boxShadow: "0 0 0 0 rgba(220,38,38,0.8)" },
+                    { boxShadow: "0 0 40px 20px rgba(220,38,38,0)", duration: 0.6 }
+                );
+                // Kill ESP move directly for instant response
+                if (esp32_ws && esp32_ws.readyState === WebSocket.OPEN) {
+                    esp32_ws.send(new Uint8Array([4]));
+                }
+                last_esp32_cmd = 4;
+            } else {
+                addLog("▶️ RESUMING MOVEMENT", "line-info");
+                gsap.fromTo(btn, 
+                    { boxShadow: "0 0 0 0 rgba(52,211,153,0.8)" },
+                    { boxShadow: "0 0 40px 20px rgba(52,211,153,0)", duration: 0.6 }
+                );
             }
-            last_esp32_cmd = 4;
             
-            // Tell backend to halt session
-            fetch("/api/esp32/stop", { method: "POST" });
+            // Sync with backend
+            fetch("/api/esp32/toggle", { method: "POST" })
+                .then(r => r.json())
+                .then(resp => {
+                    btn.innerText = resp.label;
+                    if (resp.follow_enabled) {
+                        btn.style.background = "linear-gradient(135deg, #dc2626, #991b1b)"; // RED
+                        document.getElementById('follow-status').innerText = 'Following: enabled';
+                    } else {
+                        btn.style.background = "linear-gradient(135deg, #f59e0b, #b45309)"; // AMBER
+                        document.getElementById('follow-status').innerText = 'Following: paused';
+                    }
+                });
         }
 
         // ═══════════════════════════════════════════

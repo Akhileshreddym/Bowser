@@ -6,6 +6,7 @@ import numpy as np
 import threading
 import time
 from PIL import Image
+from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,12 @@ class VisionTracker:
         self.camera_index = camera_index
         self.cap = cv2.VideoCapture(self.camera_index)
         self.pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+        try:
+            self.yolo = YOLO('yolov8n.pt')
+            logger.info("YOLOv8 model loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load YOLO model: {e}")
+            self.yolo = None
         self.latest_data = {"squat_angle": 180, "arm_angle": 180, "center_x": 0.5, "center_y": 0.5, "distance_depth": 128}
         # Exponential moving average for angle smoothing
         self._ema_squat = 180.0
@@ -104,13 +111,32 @@ class VisionTracker:
         
         # To improve performance, optionally mark the image as not writeable to pass by reference
         image_rgb.flags.writeable = False
-        results = self.pose.process(image_rgb)
+        
+        # ── YOLO PERSON DETECTION ──
+        yolo_person_detected = False
+        yolo_box = None
+        if self.yolo:
+            yolo_results = self.yolo(image_rgb, classes=[0], conf=0.5, verbose=False)
+            if yolo_results and len(yolo_results[0].boxes) > 0:
+                yolo_person_detected = True
+                # Get the most central/large detection
+                yolo_box = yolo_results[0].boxes[0] 
+                # Draw box for debugging
+                b = yolo_box.xyxy[0].cpu().numpy().astype(int)
+                cv2.rectangle(image, (b[0], b[1]), (b[2], b[3]), (0, 255, 255), 2)
+                cv2.putText(image, "HUMAN", (b[0], b[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        
+        # Only process pose if YOLO confirms a human is present (or if YOLO failed to load)
+        results = None
+        if yolo_person_detected or self.yolo is None:
+            results = self.pose.process(image_rgb)
+        
         image_rgb.flags.writeable = True
         
         VIS_THRESH = 0.5  # Lower threshold for better detection
         vision_data = {"squat_angle": 180, "arm_angle": 180, "center_x": 0.5, "shoulder_width": 0.2}
         
-        if results.pose_landmarks:
+        if results and results.pose_landmarks:
             mp_drawing.draw_landmarks(
                 image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
             
@@ -208,12 +234,21 @@ class VisionTracker:
                     vision_data["t_pose"] = left_arm_extended and right_arm_extended and left_arm_horizontal and right_arm_horizontal
                     cv2.putText(image, f"T-Pose: {vision_data['t_pose']}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
                     
+                    # Check if ankles are visible (whole body visibility)
+                    l_ankle = landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value]
+                    r_ankle = landmarks[mp_pose.PoseLandmark.RIGHT_ANKLE.value]
+                    vision_data["whole_body_visible"] = l_ankle.visibility > VIS_THRESH and r_ankle.visibility > VIS_THRESH
+                    cv2.putText(image, f"Whole Body: {vision_data['whole_body_visible']}", (50, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                    
             except Exception as e:
                 pass
                 
         self.latest_data = vision_data
         
-        vision_data["person_detected"] = results.pose_landmarks is not None
+        vision_data["person_detected"] = (results is not None and results.pose_landmarks is not None)
+        if not vision_data["person_detected"]:
+            vision_data["whole_body_visible"] = False
+            vision_data["t_pose"] = False
         
         # Encode as JPEG
         ret, buffer = cv2.imencode('.jpg', image)
