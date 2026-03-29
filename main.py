@@ -61,11 +61,15 @@ class AppState:
         self.director_dialogue = "Welcome! Scan a bracelet to begin."
         self.roomba_output = "drive 0,0"
         self.latest_audio_url = ""
+        self.latest_audio_error = ""
+        self.latest_audio_event_id = 0
         self.is_active = False
         self.target_locked = False
         self.follow_enabled = True
         self.kid_speech = ""
         self.session_id = "session_default"
+        self.last_audio_time = 0.0
+        self.reset_video_reps = False  # Flag to tell video thread to reset last_reps
 
 state = AppState()
 active_connections: list[WebSocket] = []
@@ -80,15 +84,23 @@ async def broadcast_state():
         "dialogue": state.director_dialogue,
         "roomba": state.roomba_output,
         "audio_url": state.latest_audio_url,
+        "audio_error": state.latest_audio_error,
+        "audio_event_id": state.latest_audio_event_id,
         "target_locked": state.target_locked,
         "is_active": state.is_active
     })
-    state.latest_audio_url = ""
     for connection in active_connections:
         try:
             await connection.send_text(message)
         except Exception as e:
             logger.warning(f"Failed to send to websocket: {e}")
+
+
+def publish_audio_event(audio_url: str, audio_error: str = ""):
+    """Publishes a new audio event for frontend playback/debugging."""
+    state.latest_audio_url = audio_url or ""
+    state.latest_audio_error = audio_error or ""
+    state.latest_audio_event_id += 1
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -100,15 +112,47 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             cmd = json.loads(data)
             if cmd.get("action") in {"scan_bracelet", "scan_qr", "scan_profile"}:
-                patient_id = cmd.get("patient_id", "akhilesh")
-                state.patient_info = get_patient_record(patient_id)
+                patient_id = cmd.get("patient_id")
+                if not patient_id:
+                     patient_id = cmd.get("id") # Fallback for different JSON keys
+                
+                if patient_id:
+                    logger.info(f"══════ SWITCHING PATIENT TO: {patient_id} ══════")
+                    state.patient_info = get_patient_record(patient_id)
                 state.is_active = True
                 state.target_locked = False
-                state.director_dialogue = f"Patient {state.patient_info.get('name')} selected. Perform T-pose to lock follow target."
 
                 # Reset clinical tracking for new patient
                 reset_clinical_state()
                 state.clinical_state = _clinical_state.copy()
+                state.reset_video_reps = True  # Tell video thread to reset its counter
+
+                # CRITICAL: Reset TTS throttle so new patient greeting ALWAYS speaks
+                state.last_audio_time = 0.0
+                state.latest_audio_url = ""
+                state.latest_audio_error = ""
+
+                patient_name = state.patient_info.get('name', 'Unknown')
+                therapy_goal = state.patient_info.get('therapy_goal', 'General')
+                greeting = f"Hello {patient_name}! Let's work on {therapy_goal} today!"
+                state.director_dialogue = greeting
+                state.director_command = "[STOP]"
+
+                # Immediate UI update with new patient data
+                await broadcast_state()
+
+                # Generate TTS for the greeting RIGHT NOW (don't wait for LLM)
+                voice_id = state.patient_info.get("voice_id", "bh4qskdfSl83na9IzVGC")
+                logger.info(f"Generating greeting TTS for {patient_name} with voice {voice_id}")
+                loop = asyncio.get_event_loop()
+                audio_url, audio_error = await loop.run_in_executor(
+                    None, generate_bowser_audio, greeting, voice_id
+                )
+                publish_audio_event(audio_url, audio_error)
+                if audio_error:
+                    logger.warning(f"Greeting TTS error: {audio_error}")
+                state.last_audio_time = time.time()
+                await broadcast_state()
 
                 # Create a fresh ADK session for this patient
                 state.session_id = f"session_{patient_id}_{int(time.time())}"
@@ -117,7 +161,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     user_id="therapist",
                     session_id=state.session_id,
                 )
-                asyncio.create_task(trigger_assistant_update())
+                # Don't immediately call assistant — let the greeting play first
             elif cmd.get("action") == "stop":
                 state.is_active = False
                 state.director_dialogue = "Session stopped."
@@ -132,19 +176,22 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def trigger_assistant_update():
     """Invokes the ADK Therapy Assistant Agent via the Runner."""
-    logger.info("Triggering ADK assistant agent...")
+    # Snapshot patient info at invocation time to prevent race conditions
+    current_patient = state.patient_info.copy()
+    current_session = state.session_id
+    
+    logger.info(f"Triggering ADK assistant agent for {current_patient.get('name', 'Unknown')}...")
 
     # Build the context message for the LLM
-    info = state.patient_info
     context = (
-        f"Patient: {info.get('name', 'Unknown')}, "
-        f"Goal: {info.get('therapy_goal', 'General')}, "
-        f"Progress: {state.clinical_state.get('reps_count', 0)}/{info.get('target_reps', 10)}"
+        f"CURRENT PATIENT NAME: {current_patient.get('name', 'Unknown')}. "
+        f"EXERCISE GOAL: {current_patient.get('therapy_goal', 'General')}. "
+        f"PROGRESS: {state.clinical_state.get('reps_count', 0)}/{current_patient.get('target_reps', 10)} reps. "
+        f"IMPORTANT: Address the child by their name {current_patient.get('name', 'Unknown')} and their specific exercise."
     )
     if state.kid_speech:
-        context += f". Kid just said: '{state.kid_speech}'"
-
-    state.kid_speech = ""
+        context += f" The child just said: '{state.kid_speech}'"
+        state.kid_speech = "" # Clear after consuming
 
     try:
         # Run the ADK agent
@@ -156,11 +203,16 @@ async def trigger_assistant_update():
         final_response = ""
         async for event in assistant_runner.run_async(
             user_id="therapist",
-            session_id=state.session_id,
+            session_id=current_session,
             new_message=content,
         ):
             if event.is_final_response() and event.content and event.content.parts:
                 final_response = event.content.parts[0].text
+
+        # If patient changed while we were waiting for LLM, discard
+        if state.session_id != current_session:
+            logger.warning(f"Patient changed during LLM call — discarding stale response for {current_patient.get('name')}")
+            return
 
         if final_response:
             # Parse command and dialogue from the response
@@ -174,19 +226,30 @@ async def trigger_assistant_update():
 
             state.director_command = command
             state.director_dialogue = dialogue
+            logger.info(f"LLM response for {current_patient.get('name')}: {dialogue[:80]}...")
 
     except Exception as e:
         logger.error(f"ADK Agent Error: {e}")
         state.director_dialogue = "I'm having trouble connecting right now."
         state.director_command = "[STOP]"
 
-    # Generate TTS
+    # Generate TTS with 4s throttle
     if state.director_dialogue:
+        current_time = time.time()
+        if current_time - state.last_audio_time < 4.0:
+            logger.info(f"ElevenLabs Throttle: Skipping voice generation (only {current_time - state.last_audio_time:.1f}s since last)")
+            await broadcast_state()
+            return
+
+        state.last_audio_time = current_time
+        voice_id = state.patient_info.get("voice_id", "bh4qskdfSl83na9IzVGC")
         loop = asyncio.get_event_loop()
-        audio_url = await loop.run_in_executor(
-            None, generate_bowser_audio, state.director_dialogue
+        audio_url, audio_error = await loop.run_in_executor(
+            None, generate_bowser_audio, state.director_dialogue, voice_id
         )
-        state.latest_audio_url = audio_url
+        publish_audio_event(audio_url, audio_error)
+        if audio_error:
+            logger.warning(f"Assistant TTS error: {audio_error}")
 
     await broadcast_state()
 
@@ -199,6 +262,11 @@ def generate_video():
         if frame_bytes is None:
             time.sleep(0.1)
             continue
+
+        # Reset video reps counter when patient switches
+        if state.reset_video_reps:
+            last_reps = 0
+            state.reset_video_reps = False
 
         # If session is NOT active, just stream the raw feed (with heartbeat) and skip logic
         if not state.is_active:

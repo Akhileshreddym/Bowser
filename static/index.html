@@ -177,9 +177,21 @@
         .ai-chat-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px 0; }
         .ai-chat-header h3 { font-size: 13px; font-weight: 600; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
         .ai-chat-header h3 .indicator { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+        .ai-chat-controls { display: flex; align-items: center; gap: 8px; }
         .ai-chat-body { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 24px; }
         .ai-dialogue { font-size: 18px; font-weight: 500; line-height: 1.6; color: var(--text-primary); max-width: 340px; }
         .ai-cmd { display: inline-block; margin-top: 16px; padding: 6px 16px; border-radius: 20px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; color: var(--accent); background: rgba(56,189,248,0.06); border: 1px solid rgba(56,189,248,0.15); }
+
+        .voice-btn {
+            padding: 6px 14px; border-radius: 20px;
+            font-size: 11px; font-weight: 600;
+            border: 1px solid rgba(56,189,248,0.2);
+            background: rgba(56,189,248,0.05);
+            color: var(--accent);
+            cursor: pointer; transition: all 0.3s;
+            margin-right: 8px;
+        }
+        .voice-btn.active { background: rgba(56,189,248,0.15); border-color: var(--accent); }
 
         .mic-btn {
             padding: 6px 14px; border-radius: 20px;
@@ -330,7 +342,10 @@
                 <div class="card ai-chat gs-reveal">
                     <div class="ai-chat-header">
                         <h3><span class="indicator"></span> Therapy Assistant</h3>
-                        <button class="mic-btn" id="mic-toggle" onclick="toggleMic()">🎤 OFF</button>
+                        <div class="ai-chat-controls">
+                            <button class="voice-btn" id="voice-enable" onclick="unlockAudio()">🔊 ENABLE VOICE</button>
+                            <button class="mic-btn" id="mic-toggle" onclick="toggleMic()">🎤 OFF</button>
+                        </div>
                     </div>
                     <div class="ai-chat-body">
                         <p class="ai-dialogue" id="assistant-dialogue">Waiting for patient scan…</p>
@@ -358,8 +373,7 @@
     <!-- Stop/Resume Toggle Button -->
     <button class="kill-btn" id="kill-btn" onclick="toggleRobotMovement()" title="Toggle Movement">STOP</button>
 
-    <!-- Hidden Audio Player -->
-    <audio id="tts-player" class="hidden"></audio>
+    <!-- Audio is handled purely via JS Audio() objects now -->
 
     <script>
         // ═══════════════════════════════════════════
@@ -389,8 +403,12 @@
         // ═══════════════════════════════════════════
         const ws = new WebSocket(`ws://${window.location.host}/ws`);
         const terminalOutput = document.getElementById("terminal-output");
-        const ttsPlayer = document.getElementById("tts-player");
-        let currentAudioUrl = "";
+        let audioUnlocked = false;
+        let currentAudio = null; // Currently playing Audio object
+        let lastAudioEventId = 0;
+        const audioQueue = [];
+        let isAudioPlaying = false;
+        let lastOutput = "";
         let prevReps = 0;
 
         let selectedCameraIndex = 'off';
@@ -402,12 +420,15 @@
         };
 
         ws.onmessage = (event) => {
+            try {
             const state = JSON.parse(event.data);
 
             // Patient
-            document.getElementById("p-name").innerText = state.patient?.name || "—";
-            document.getElementById("p-age").innerText = state.patient?.age || "—";
-            document.getElementById("p-goal").innerText = state.patient?.therapy_goal || "—";
+            if (state.patient) {
+                document.getElementById("p-name").innerText = state.patient.name || "—";
+                document.getElementById("p-age").innerText = state.patient.age || "—";
+                document.getElementById("p-goal").innerText = state.patient.therapy_goal || "—";
+            }
 
             // Clinical
             document.getElementById("active-exercise").innerText = state.clinical.active_exercise;
@@ -447,15 +468,88 @@
                 }
             }
 
-            // Audio
-            if (state.audio_url && state.audio_url !== currentAudioUrl) {
-                currentAudioUrl = state.audio_url;
-                ttsPlayer.src = currentAudioUrl;
-                ttsPlayer.play().catch(e => console.error("Audio blocked:", e));
+            // Audio events from backend (exactly-once via event_id)
+            const audioEventId = Number(state.audio_event_id || 0);
+            if (audioEventId > lastAudioEventId) {
+                lastAudioEventId = audioEventId;
+                if (state.audio_error) {
+                    addLog(`✗ TTS error: ${state.audio_error}`, "line-err");
+                }
+                if (state.audio_url) {
+                    if (audioUnlocked) {
+                        enqueueAudio(state.audio_url);
+                    } else {
+                        addLog("⚠ Click 'ENABLE VOICE' first", "line-warn");
+                    }
+                }
+            }
+            } catch (err) {
+                console.error("WS onmessage failed:", err);
+                addLog(`✗ WS parse/runtime error: ${err.message || err}`, "line-err");
             }
         };
 
+        function unlockAudio() {
+            if (audioUnlocked) return;
+            const btn = document.getElementById("voice-enable");
+            audioUnlocked = true;
+            btn.innerText = "🔊 VOICE READY";
+            btn.classList.add("active");
+            addLog("🔊 Voice enabled", "line-info");
+            document.body.removeEventListener('click', unlockAudio);
+            if (audioQueue.length > 0 && !isAudioPlaying) {
+                playNextAudio();
+            }
+        }
+
+        // Unlock on any click
+        document.body.addEventListener('click', unlockAudio, { once: false });
+
         ws.onclose = () => addLog("⚠ Connection lost", "line-err");
+
+        function enqueueAudio(audioUrl) {
+            audioQueue.push(audioUrl);
+            if (!isAudioPlaying) {
+                playNextAudio();
+            }
+        }
+
+        async function playNextAudio() {
+            if (isAudioPlaying || audioQueue.length === 0) return;
+            isAudioPlaying = true;
+            const audioUrl = audioQueue.shift();
+            let objectUrl = "";
+
+            try {
+                const res = await fetch(audioUrl, { cache: "no-store" });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+                const blob = await res.blob();
+                objectUrl = URL.createObjectURL(blob);
+                currentAudio = new Audio(objectUrl);
+
+                await currentAudio.play();
+                addLog("🎙 Speaking...", "line-info");
+
+                await new Promise((resolve) => {
+                    currentAudio.onended = resolve;
+                    currentAudio.onerror = resolve;
+                });
+            } catch (e) {
+                console.error("Audio playback failed:", e);
+                addLog(`⚠ Audio playback failed (${e.message || e})`, "line-warn");
+            } finally {
+                if (currentAudio) {
+                    currentAudio.pause();
+                    currentAudio = null;
+                }
+                if (objectUrl) URL.revokeObjectURL(objectUrl);
+                isAudioPlaying = false;
+                if (audioQueue.length > 0) {
+                    playNextAudio();
+                }
+            }
+        }
 
         function addLog(text, cls) {
             const div = document.createElement("div");
@@ -467,11 +561,25 @@
             gsap.from(div, { x: -10, opacity: 0, duration: 0.3, ease: "power2.out" });
         }
 
-        function scanBracelet(id) {
+        let manualOverrideUntil = 0; // Timestamp: suppress QR scanning until this time
+
+        function scanBracelet(id, fromQr = false) {
             addLog(`→ Scanning bracelet: ${id}`, "line-warn");
             ws.send(JSON.stringify({ action: "scan_bracelet", patient_id: id }));
-            ttsPlayer.src = "";
-            ttsPlayer.play().catch(() => {});
+            
+            // Stop any currently playing audio
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            audioQueue.length = 0;
+            isAudioPlaying = false;
+
+            // If triggered by a manual button click, suppress QR for 10s
+            if (!fromQr) {
+                manualOverrideUntil = Date.now() + 10000;
+                lastQrValue = null; // Reset QR tracking so it can re-detect later
+            }
 
             // Button ripple
             gsap.fromTo(".patient-bar", { borderColor: "rgba(56,189,248,0.4)" }, { borderColor: "rgba(255,255,255,0.04)", duration: 1.2, ease: "power2.out" });
@@ -614,6 +722,9 @@
 
         function toggleMic() {
             if (!recognition) return;
+            // Attempt audio unlock on this gesture too
+            unlockAudio();
+            
             isMicOn = !isMicOn;
             const btn = document.getElementById("mic-toggle");
             if (isMicOn) {
@@ -644,7 +755,7 @@
         // ═══════════════════════════════════════════
         // AUTOMATIC QR SCANNER LOOP (using the same /video_feed stream)
         // ═══════════════════════════════════════════
-        const knownProfiles = { akhilesh: true, bailey: true, john: true };
+        const knownProfiles = { "akhilesh": true, "bailey": true, "john": true };
         let lastQrValue = null;
         let lastQrAt = 0;
 
@@ -666,11 +777,15 @@
                             const value = String(qrCode.data).trim().toLowerCase();
                             if (knownProfiles[value]) {
                                 const now = Date.now();
-                                if (value !== lastQrValue || (now - lastQrAt) > 3000) {
+                                // Skip if manual override is active (button was clicked recently)
+                                if (now < manualOverrideUntil) {
+                                    // Suppressed — manual selection takes priority
+                                } else if (value !== lastQrValue) {
+                                    // Only trigger on a DIFFERENT QR code, never re-trigger the same one
                                     lastQrValue = value;
                                     lastQrAt = now;
                                     addLog(`📷 QR matched: ${value}`, 'line-info');
-                                    scanBracelet(value);
+                                    scanBracelet(value, true);
                                 }
                             }
                         }

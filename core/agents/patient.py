@@ -9,19 +9,22 @@ _PATIENT_DB = {
         "name": "Akhilesh",
         "age": 11,
         "therapy_goal": "Arm Raises X20",
-        "target_reps": 20
+        "target_reps": 20,
+        "voice_id": "bh4qskdfSl83na9IzVGC"
     },
     "bailey": {
         "name": "Bailey",
         "age": 9,
         "therapy_goal": "Squats X20",
-        "target_reps": 20
+        "target_reps": 20,
+        "voice_id": "bh4qskdfSl83na9IzVGC"
     },
     "john": {
         "name": "John",
         "age": 12,
         "therapy_goal": "Side Reach X20",
-        "target_reps": 20
+        "target_reps": 20,
+        "voice_id": "bh4qskdfSl83na9IzVGC"
     }
 }
 
