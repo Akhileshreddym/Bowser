@@ -291,7 +291,7 @@
                             <option value="2">iPhone 14 Pro Max</option>
                             <option value="3">iPhone 17 Pro Max</option>
                         </select>
-                        <img id="video-feed" src="/video_feed" alt="Video Feed" onerror="this.onerror=null; this.src='data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22400%22%3E%3Crect fill=%22%23111%22 width=%22640%22 height=%22400%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23333%22 font-family=%22Inter%22 font-size=%2214%22%3EFEED OFFLINE%3C/text%3E%3C/svg%3E'">
+                        <img id="video-feed" src="/video_feed" alt="Video Feed" onerror="this.onerror=null; this.src='data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22400%22%3E%3Crect fill=%22%23111%22 width=%22640%22 height=%22400%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23333%22 font-family=%22Inter%22 font-size=%2214%22%3EFEED OFFLINE%3C/text%3E%3C/svg%3E'" style="width:100%; height:100%; object-fit:cover;" />
                     </div>
                 </div>
 
@@ -388,7 +388,13 @@
         let currentAudioUrl = "";
         let prevReps = 0;
 
-        ws.onopen = () => addLog("→ Connected to therapy hub", "line-info");
+        let selectedCameraIndex = 'off';
+        const videoFeedEl = document.getElementById('video-feed');
+
+        ws.onopen = () => {
+            addLog("→ Connected to therapy hub", "line-info");
+            // Do not auto-select a camera; user must choose from dropdown
+        };
 
         ws.onmessage = (event) => {
             const state = JSON.parse(event.data);
@@ -461,18 +467,20 @@
         }
 
         function changeCamera(index) {
+            selectedCameraIndex = index;
             addLog(`→ Camera switching: ${index}`, "line-warn");
+
+            const img = document.getElementById("video-feed");
+            if (index === 'off') {
+                img.src = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22400%22%3E%3Crect fill=%22%23111%22 width=%22640%22 height=%22400%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23333%22 font-family=%22Inter%22 font-size=%2214%22%3EFEED OFFLINE%3C/text%3E%3C/svg%3E";
+                return;
+            }
+
             fetch(`/api/camera/${index}`, { method: "POST" })
                 .then(r => r.json())
                 .then(() => {
-                    const img = document.getElementById("video-feed");
-                    gsap.to(img, { opacity: 0, duration: 0.2, onComplete: () => {
-                        img.src = "";
-                        setTimeout(() => {
-                            img.src = `/video_feed?t=${Date.now()}`;
-                            gsap.to(img, { opacity: 1, duration: 0.4 });
-                        }, 400);
-                    }});
+                    img.src = `/video_feed?t=${Date.now()}`;
+                    addLog(`→ Camera frame source in use (${index})`, "line-info");
                 })
                 .catch(err => addLog(`✗ Camera error: ${err}`, "line-err"));
         }
@@ -591,56 +599,45 @@
         });
 
         // ═══════════════════════════════════════════
-        // AUTOMATIC QR SCANNER LOOP
+        // AUTOMATIC QR SCANNER LOOP (using the same /video_feed stream)
         // ═══════════════════════════════════════════
         const knownProfiles = { akhilesh: true, bailey: true, john: true };
         let lastQrValue = null;
         let lastQrAt = 0;
 
-        const qrVideo = document.createElement('video');
-        qrVideo.setAttribute('playsinline', 'true');
-        qrVideo.style.position = 'fixed';
-        qrVideo.style.width = '1px';
-        qrVideo.style.height = '1px';
-        qrVideo.style.opacity = '0';
-        document.body.appendChild(qrVideo);
-
+        const qrImage = document.getElementById('video-feed');
         const qrCanvas = document.createElement('canvas');
         const qrContext = qrCanvas.getContext('2d');
 
         function startQrScanner() {
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
-                .then(stream => {
-                    qrVideo.srcObject = stream;
-                    qrVideo.play();
-                    const scanLoop = () => {
-                        if (qrVideo.readyState === qrVideo.HAVE_ENOUGH_DATA) {
-                            qrCanvas.width = qrVideo.videoWidth;
-                            qrCanvas.height = qrVideo.videoHeight;
-                            qrContext.drawImage(qrVideo, 0, 0, qrCanvas.width, qrCanvas.height);
-                            const imageData = qrContext.getImageData(0, 0, qrCanvas.width, qrCanvas.height);
-                            const qrCode = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+            const scanLoop = () => {
+                if (qrImage.naturalWidth && qrImage.naturalHeight) {
+                    qrCanvas.width = qrImage.naturalWidth;
+                    qrCanvas.height = qrImage.naturalHeight;
+                    try {
+                        qrContext.drawImage(qrImage, 0, 0, qrCanvas.width, qrCanvas.height);
+                        const imageData = qrContext.getImageData(0, 0, qrCanvas.width, qrCanvas.height);
+                        const qrCode = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
 
-                            if (qrCode && qrCode.data) {
-                                const value = String(qrCode.data).trim().toLowerCase();
-                                if (knownProfiles[value]) {
-                                    const now = Date.now();
-                                    if (value !== lastQrValue || (now - lastQrAt) > 3000) {
-                                        lastQrValue = value;
-                                        lastQrAt = now;
-                                        addLog(`📷 QR matched: ${value}`, 'line-info');
-                                        scanBracelet(value);
-                                    }
+                        if (qrCode && qrCode.data) {
+                            const value = String(qrCode.data).trim().toLowerCase();
+                            if (knownProfiles[value]) {
+                                const now = Date.now();
+                                if (value !== lastQrValue || (now - lastQrAt) > 3000) {
+                                    lastQrValue = value;
+                                    lastQrAt = now;
+                                    addLog(`📷 QR matched: ${value}`, 'line-info');
+                                    scanBracelet(value);
                                 }
                             }
                         }
-                        requestAnimationFrame(scanLoop);
-                    };
-                    requestAnimationFrame(scanLoop);
-                })
-                .catch(err => {
-                    addLog(`✗ QR scanner unavailable: ${err}`, 'line-err');
-                });
+                    } catch (err) {
+                        // sometimes the image is not ready for draw due loading transients
+                    }
+                }
+                requestAnimationFrame(scanLoop);
+            };
+            requestAnimationFrame(scanLoop);
         }
 
         startQrScanner();
