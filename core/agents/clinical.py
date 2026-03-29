@@ -10,7 +10,8 @@ _clinical_state = {
     "active_exercise": "None",
     "reps_count": 0,
     "form_quality": "unknown",
-    "is_in_rep": False
+    "is_in_rep": False,
+    "latest_angle": 180.0,
 }
 _last_rep_time = 0.0
 _REP_COOLDOWN = 0.8  # Minimum seconds between counted reps
@@ -31,13 +32,22 @@ def analyze_pose_data(squat_angle: float, arm_angle: float, therapy_goal: str) -
     """
     global _clinical_state, _last_rep_time
 
-    if "Arm raise" in therapy_goal:
+    goal = (therapy_goal or "").lower()
+
+    if "arm raise" in goal:
         angle = arm_angle
         _clinical_state["active_exercise"] = "Arm Raises"
         # Arm at side ≈ 20-40°, Arm raised ≈ 150-170°
         threshold_enter = 140   # Must raise above this to start a rep
         threshold_exit = 60     # Must lower below this to complete a rep
         enter_high = True       # "enter" means going HIGH
+    elif "side reach" in goal or "side" in goal:
+        angle = arm_angle
+        _clinical_state["active_exercise"] = "Side Reach"
+        # Similar to lateral raise cycle: high for entry, low for completion
+        threshold_enter = 120
+        threshold_exit = 55
+        enter_high = True
     else:
         angle = squat_angle
         _clinical_state["active_exercise"] = "Squats"
@@ -46,6 +56,7 @@ def analyze_pose_data(squat_angle: float, arm_angle: float, therapy_goal: str) -
         enter_high = False      # "enter" means going LOW
 
     now = time.time()
+    _clinical_state["latest_angle"] = round(float(angle), 2)
 
     if not enter_high:
         # Squats: enter when angle goes LOW, exit when angle goes HIGH
@@ -83,7 +94,8 @@ def reset_clinical_state() -> dict:
         "active_exercise": "None",
         "reps_count": 0,
         "form_quality": "unknown",
-        "is_in_rep": False
+        "is_in_rep": False,
+        "latest_angle": 180.0,
     }
     return _clinical_state.copy()
 

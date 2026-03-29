@@ -10,12 +10,13 @@ Commands:
 """
 import logging
 import asyncio
+import os
 import websockets
 
 logger = logging.getLogger(__name__)
 
 # ESP32 WebSocket endpoint
-ESP32_WS_URL = "ws://172.20.10.2/control"
+ESP32_WS_URL = os.getenv("ESP32_WS_URL", "ws://172.20.10.2/control")
 
 # Command byte mapping
 CMD_FORWARD  = 0

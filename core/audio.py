@@ -16,6 +16,13 @@ MODEL_FALLBACKS = (
     "eleven_turbo_v2_5",
     "eleven_monolingual_v1",
 )
+VOICE_SETTINGS = {
+    # Keeps cloned voice identity/accent strong while staying expressive.
+    "stability": 0.45,
+    "similarity_boost": 0.9,
+    "style": 0.35,
+    "use_speaker_boost": True,
+}
 
 
 def _tts_request(text: str, voice_id: str, model_id: str) -> bytes:
@@ -29,10 +36,7 @@ def _tts_request(text: str, voice_id: str, model_id: str) -> bytes:
     payload = {
         "text": text,
         "model_id": model_id,
-        "voice_settings": {
-            "stability": 0.45,
-            "similarity_boost": 0.75,
-        },
+        "voice_settings": VOICE_SETTINGS,
     }
     with httpx.Client(timeout=45.0) as client:
         response = client.post(url, params={"output_format": "mp3_44100_128"}, headers=headers, json=payload)
@@ -56,9 +60,8 @@ def generate_bowser_audio(text: str, voice_id: str = DEFAULT_VOICE_ID) -> tuple[
     filename = f"audio_{uuid.uuid4().hex}.mp3"
     file_path = STATIC_AUDIO_DIR / filename
 
-    candidate_voices = [voice_id or DEFAULT_VOICE_ID]
-    if DEFAULT_VOICE_ID not in candidate_voices:
-        candidate_voices.append(DEFAULT_VOICE_ID)
+    # Force the custom cloned voice so accent/character remains consistent.
+    candidate_voices = [DEFAULT_VOICE_ID]
 
     last_error = "Unknown ElevenLabs error"
     for candidate_voice in candidate_voices:

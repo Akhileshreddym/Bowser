@@ -219,6 +219,16 @@
         .terminal-body .line-warn { color: var(--amber); }
         .terminal-body .line-err { color: var(--rose); }
         .terminal-body .line-info { color: var(--accent); }
+        .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .mini-card { padding: 14px; border-radius: 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); }
+        .mini-title { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+        .mini-value { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text-primary); line-height: 1.5; }
+        .health-pill { display: inline-block; padding: 3px 8px; margin: 2px 4px 0 0; border-radius: 999px; font-size: 10px; border: 1px solid rgba(255,255,255,0.08); color: var(--text-secondary); }
+        .health-pill.ok { color: var(--green); border-color: rgba(52,211,153,0.3); }
+        .health-pill.bad { color: var(--rose); border-color: rgba(244,63,94,0.3); }
+        .agent-board { padding: 14px; max-height: 170px; overflow: auto; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+        .agent-line { margin-bottom: 6px; color: var(--text-secondary); }
+        .agent-line strong { color: var(--accent); font-weight: 600; }
 
         /* ─── Kill Button ─── */
         .kill-btn {
@@ -333,6 +343,20 @@
                         <div class="stat-value green" id="form-quality">—</div>
                     </div>
                 </div>
+
+                <div class="mini-grid gs-reveal">
+                    <div class="mini-card">
+                        <div class="mini-title">Session Score</div>
+                        <div class="mini-value" id="session-score">0/0 (0%)</div>
+                        <div class="mini-value" id="session-elapsed">00:00 elapsed</div>
+                    </div>
+                    <div class="mini-card">
+                        <div class="mini-title">System Health</div>
+                        <div id="health-pills">
+                            <span class="health-pill">loading...</span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- RIGHT COL -->
@@ -343,7 +367,6 @@
                     <div class="ai-chat-header">
                         <h3><span class="indicator"></span> Therapy Assistant</h3>
                         <div class="ai-chat-controls">
-                            <button class="voice-btn" id="voice-enable" onclick="unlockAudio()">🔊 ENABLE VOICE</button>
                             <button class="mic-btn" id="mic-toggle" onclick="toggleMic()">🎤 OFF</button>
                         </div>
                     </div>
@@ -363,6 +386,16 @@
                         <div class="terminal-body" id="terminal-output">
                             <div class="line-muted">→ System initialized. Awaiting session…</div>
                         </div>
+                    </div>
+                </div>
+
+                <div class="card gs-reveal">
+                    <div class="terminal" style="padding-top: 12px;">
+                        <div class="terminal-header">
+                            <span class="circle" style="background: var(--accent);"></span>
+                            Agent Collaboration (ADK)
+                        </div>
+                        <div class="agent-board" id="agent-board"></div>
                     </div>
                 </div>
             </div>
@@ -401,18 +434,31 @@
         // ═══════════════════════════════════════════
         // WEBSOCKET
         // ═══════════════════════════════════════════
-        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+        const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
+        const ws = new WebSocket(`${wsScheme}://${window.location.host}/ws`);
         const terminalOutput = document.getElementById("terminal-output");
+        const agentBoard = document.getElementById("agent-board");
         let audioUnlocked = false;
-        let currentAudio = null; // Currently playing Audio object
+        let currentAudio = null; // points to the shared audio element when active
+        let sharedAudioEl = null;
         let lastAudioEventId = 0;
         const audioQueue = [];
         let isAudioPlaying = false;
+        let isUnlockingAudio = false;
+        let currentPlaybackDone = null;
         let lastOutput = "";
         let prevReps = 0;
+        let lastAgentTraceTs = 0;
+        let latestDialogue = "";
+        let lastFallbackText = "";
+        let lastFallbackAt = 0;
+        let pendingFallbackTimer = null;
+        let consecutiveElevenLabsFails = 0;
+        let elevenLabsPlayedOnce = false;
 
         let selectedCameraIndex = 'off';
         const videoFeedEl = document.getElementById('video-feed');
+        agentBoard.innerHTML = '<div class="agent-line"><strong>waiting</strong> · awaiting websocket updates</div>';
 
         ws.onopen = () => {
             addLog("→ Connected to therapy hub", "line-info");
@@ -436,35 +482,67 @@
 
             // Reps with GSAP number pop
             const newReps = state.clinical.reps_count;
+            const targetReps = state.summary?.target_reps || state.patient?.target_reps || 0;
+            document.getElementById("reps-counter").innerText = `${newReps}/${targetReps}`;
             if (newReps !== prevReps) {
                 prevReps = newReps;
                 const el = document.getElementById("reps-counter");
-                el.innerText = newReps;
                 gsap.fromTo(el, { scale: 1.6, color: "#fbbf24" }, { scale: 1, color: "#38bdf8", duration: 0.5, ease: "elastic.out(1, 0.4)" });
             }
 
             // Follow status
             if (state.target_locked !== undefined) {
-                const lockText = state.target_locked ? 'Target: locked' : 'Target: unlocked';
-                document.getElementById('follow-status').innerText = lockText;
+                const lockText = state.target_locked ? "locked" : "unlocked";
+                const followText = state.health?.robot_follow_enabled ? "enabled" : "paused";
+                document.getElementById('follow-status').innerText = `Target: ${lockText} | Follow: ${followText}`;
             }
 
             // AI
             document.getElementById("assistant-dialogue").innerText = state.dialogue;
             document.getElementById("assistant-command").innerText = state.command || "[IDLE]";
+            latestDialogue = state.dialogue || "";
 
             // Terminal
-            if (state.roomba_output !== lastOutput) {
-                lastOutput = state.roomba_output;
+            if (state.roomba !== lastOutput) {
+                lastOutput = state.roomba;
                 addLog(`⚙️ CMD: ${lastOutput}`, "");
-                
-                // Proxy command directly to ESP32
-                const cmdByte = driveStringToByte(lastOutput);
-                if (cmdByte !== last_esp32_cmd) {
-                    if (esp32_ws && esp32_ws.readyState === WebSocket.OPEN) {
-                        esp32_ws.send(new Uint8Array([cmdByte]));
-                        last_esp32_cmd = cmdByte;
-                    }
+            }
+
+            // Session summary scorecard
+            if (state.summary) {
+                const pct = Math.round((state.summary.completion || 0) * 100);
+                document.getElementById("session-score").innerText =
+                    `${state.summary.reps}/${state.summary.target_reps} (${pct}%)`;
+                const secs = Number(state.summary.elapsed_seconds || 0);
+                const mm = String(Math.floor(secs / 60)).padStart(2, "0");
+                const ss = String(secs % 60).padStart(2, "0");
+                const suffix = state.summary.completed ? " · complete" : "";
+                document.getElementById("session-elapsed").innerText = `${mm}:${ss} elapsed${suffix}`;
+            }
+
+            // Health pills
+            if (state.health) {
+                const pill = (label, ok) =>
+                    `<span class="health-pill ${ok ? "ok" : "bad"}">${label}</span>`;
+                document.getElementById("health-pills").innerHTML =
+                    pill("Vision", !!state.health.vision) +
+                    pill("LLM", !!state.health.llm_ready) +
+                    pill("Voice", !!state.health.audio_ready) +
+                    pill("Robot", !!state.health.robot_follow_enabled);
+            }
+
+            // Agent collaboration board
+            if (state.agent_status) {
+                const rows = Object.entries(state.agent_status).map(([name, info]) =>
+                    `<div class="agent-line"><strong>${name}</strong> · ${info.status} · #${info.events}<br>${info.last}</div>`
+                );
+                agentBoard.innerHTML = rows.join("");
+            }
+            if (Array.isArray(state.agent_trace) && state.agent_trace.length > 0) {
+                const latest = state.agent_trace[state.agent_trace.length - 1];
+                if (latest.t !== lastAgentTraceTs) {
+                    lastAgentTraceTs = latest.t;
+                    addLog(`🤖 ${latest.agent}: ${latest.message}`, latest.status === "degraded" ? "line-warn" : "line-info");
                 }
             }
 
@@ -476,11 +554,9 @@
                     addLog(`✗ TTS error: ${state.audio_error}`, "line-err");
                 }
                 if (state.audio_url) {
-                    if (audioUnlocked) {
-                        enqueueAudio(state.audio_url);
-                    } else {
-                        addLog("⚠ Click 'ENABLE VOICE' first", "line-warn");
-                    }
+                    enqueueAudio(state.audio_url);
+                    if (!audioUnlocked && !isUnlockingAudio) unlockAudio();
+                    scheduleSpeechFailover();
                 }
             }
             } catch (err) {
@@ -490,32 +566,63 @@
         };
 
         function unlockAudio() {
-            if (audioUnlocked) return;
-            const btn = document.getElementById("voice-enable");
+            if (isUnlockingAudio) return;
+            isUnlockingAudio = true;
+            // Optimistic unlock on user gesture; relock only on explicit rejection.
             audioUnlocked = true;
-            btn.innerText = "🔊 VOICE READY";
-            btn.classList.add("active");
-            addLog("🔊 Voice enabled", "line-info");
-            document.body.removeEventListener('click', unlockAudio);
-            if (audioQueue.length > 0 && !isAudioPlaying) {
-                playNextAudio();
+            if (!sharedAudioEl) {
+                sharedAudioEl = new Audio();
+                sharedAudioEl.preload = "auto";
             }
+            const primer = new Audio("/static/audio/silence.wav");
+            primer.volume = 0.01;
+            primer.play().then(() => {
+                primer.pause();
+                sharedAudioEl.volume = 1.0;
+                addLog("🔊 Voice enabled", "line-info");
+                if (audioQueue.length > 0 && !isAudioPlaying) {
+                    playNextAudio();
+                }
+            }).catch((e) => {
+                // Keep unlocked optimistic state; actual play() rejection will relock if needed.
+                addLog("⚠ Autoplay primer blocked; attempting direct playback", "line-warn");
+                console.warn("Audio unlock failed:", e);
+            }).finally(() => {
+                isUnlockingAudio = false;
+            });
         }
 
-        // Unlock on any click
+        // Auto-unlock attempts (browser may still require gesture)
         document.body.addEventListener('click', unlockAudio, { once: false });
+        document.body.addEventListener('pointerdown', unlockAudio, { once: false });
+        document.body.addEventListener('touchstart', unlockAudio, { once: false, passive: true });
+        window.addEventListener('keydown', unlockAudio, { once: false });
+        setTimeout(unlockAudio, 250);
 
         ws.onclose = () => addLog("⚠ Connection lost", "line-err");
 
         function enqueueAudio(audioUrl) {
             audioQueue.push(audioUrl);
+            if (!audioUnlocked && !isUnlockingAudio) unlockAudio();
             if (!isAudioPlaying) {
                 playNextAudio();
             }
         }
 
+        function scheduleSpeechFailover() {
+            if (pendingFallbackTimer) clearTimeout(pendingFallbackTimer);
+            const text = latestDialogue;
+            pendingFallbackTimer = setTimeout(() => {
+                // Use fallback only if ElevenLabs repeatedly failed.
+                if ((!audioUnlocked || !currentAudio) && audioQueue.length > 0 && consecutiveElevenLabsFails >= 2) {
+                    speakBrowserFallback(text);
+                }
+            }, 3500);
+        }
+
         async function playNextAudio() {
             if (isAudioPlaying || audioQueue.length === 0) return;
+            if (!audioUnlocked) return;
             isAudioPlaying = true;
             const audioUrl = audioQueue.shift();
             let objectUrl = "";
@@ -526,19 +633,44 @@
 
                 const blob = await res.blob();
                 objectUrl = URL.createObjectURL(blob);
-                currentAudio = new Audio(objectUrl);
+                if (!sharedAudioEl) {
+                    sharedAudioEl = new Audio();
+                    sharedAudioEl.preload = "auto";
+                }
+                sharedAudioEl.src = objectUrl;
+                currentAudio = sharedAudioEl;
 
                 await currentAudio.play();
+                consecutiveElevenLabsFails = 0;
+                elevenLabsPlayedOnce = true;
                 addLog("🎙 Speaking...", "line-info");
 
                 await new Promise((resolve) => {
+                    currentPlaybackDone = resolve;
                     currentAudio.onended = resolve;
                     currentAudio.onerror = resolve;
                 });
             } catch (e) {
                 console.error("Audio playback failed:", e);
-                addLog(`⚠ Audio playback failed (${e.message || e})`, "line-warn");
+                const msg = String(e?.message || e || "");
+                if (msg.toLowerCase().includes("not allowed")) {
+                    audioUnlocked = false;
+                    consecutiveElevenLabsFails += 1;
+                    audioQueue.unshift(audioUrl);
+                    addLog("⚠ Audio blocked by browser; waiting for interaction", "line-warn");
+                    unlockAudio();
+                    if (consecutiveElevenLabsFails >= 2 || !elevenLabsPlayedOnce) {
+                        speakBrowserFallback(latestDialogue);
+                    }
+                } else {
+                    consecutiveElevenLabsFails += 1;
+                    addLog(`⚠ Audio playback failed (${msg})`, "line-warn");
+                    if (consecutiveElevenLabsFails >= 2) {
+                        speakBrowserFallback(latestDialogue);
+                    }
+                }
             } finally {
+                currentPlaybackDone = null;
                 if (currentAudio) {
                     currentAudio.pause();
                     currentAudio = null;
@@ -561,16 +693,48 @@
             gsap.from(div, { x: -10, opacity: 0, duration: 0.3, ease: "power2.out" });
         }
 
+        function speakBrowserFallback(text) {
+            const clean = String(text || "").trim();
+            if (!clean || !("speechSynthesis" in window)) return;
+            const now = Date.now();
+            if (clean === lastFallbackText && (now - lastFallbackAt) < 2500) return;
+            try {
+                const utt = new SpeechSynthesisUtterance(clean);
+                utt.rate = 0.95;
+                utt.pitch = 0.9;
+                utt.volume = 1.0;
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.speak(utt);
+                lastFallbackText = clean;
+                lastFallbackAt = now;
+                addLog("🗣️ Fallback voice active", "line-warn");
+            } catch (err) {
+                console.warn("Fallback speech failed:", err);
+            }
+        }
+
         let manualOverrideUntil = 0; // Timestamp: suppress QR scanning until this time
 
         function scanBracelet(id, fromQr = false) {
+            // This is a real user gesture when button-triggered; prime audio first.
+            unlockAudio();
             addLog(`→ Scanning bracelet: ${id}`, "line-warn");
-            ws.send(JSON.stringify({ action: "scan_bracelet", patient_id: id }));
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: "scan_bracelet", patient_id: id }));
+            } else {
+                addLog("✗ WebSocket not connected", "line-err");
+                return;
+            }
             
             // Stop any currently playing audio
             if (currentAudio) {
                 currentAudio.pause();
                 currentAudio = null;
+            }
+            if (currentPlaybackDone) {
+                // Unblock playNextAudio loop when we interrupt playback mid-track.
+                currentPlaybackDone();
+                currentPlaybackDone = null;
             }
             audioQueue.length = 0;
             isAudioPlaying = false;
@@ -616,45 +780,6 @@
                 .catch(err => addLog(`✗ Unlock error: ${err}`, 'line-err'));
         }
 
-        // ═══════════════════════════════════════════
-        // ESP32 DIRECT BROWSER WEBSOCKET (STABILITY FIX)
-        // ═══════════════════════════════════════════
-        const ESP32_URL = "ws://172.20.10.2/control";
-        let esp32_ws = null;
-        let last_esp32_cmd = -1;
-
-        function connectESP32() {
-            if (esp32_ws) return;
-            esp32_ws = new WebSocket(ESP32_URL);
-            esp32_ws.binaryType = "arraybuffer";
-
-            esp32_ws.onopen = () => {
-                addLog(`⚙️ ESP32 Connected (${ESP32_URL})`, "line-info");
-            };
-            esp32_ws.onclose = () => {
-                addLog(`⚠️ ESP32 Disconnected. Reconnecting...`, "line-err");
-                esp32_ws = null;
-                setTimeout(connectESP32, 3000);
-            };
-            esp32_ws.onerror = (err) => {
-                esp32_ws.close();
-            };
-        }
-
-        function driveStringToByte(driveStr) {
-            if (!driveStr || !driveStr.includes("drive")) return 4;
-            const parts = driveStr.replace("drive", "").trim().split(",");
-            if (parts.length !== 2) return 4;
-            const vel = parseInt(parts[0]);
-            const turn = parseInt(parts[1]);
-            
-            if (vel === 0 && turn === 0) return 4;
-            if (Math.abs(turn) > Math.abs(vel)) return turn > 0 ? 2 : 3;
-            return vel > 0 ? 0 : 1;
-        }
-
-        connectESP32();
-
         function toggleRobotMovement() {
             const btn = document.getElementById("kill-btn");
             const isCurrentlyStop = btn.innerText === "STOP";
@@ -665,11 +790,6 @@
                     { boxShadow: "0 0 0 0 rgba(220,38,38,0.8)" },
                     { boxShadow: "0 0 40px 20px rgba(220,38,38,0)", duration: 0.6 }
                 );
-                // Kill ESP move directly for instant response
-                if (esp32_ws && esp32_ws.readyState === WebSocket.OPEN) {
-                    esp32_ws.send(new Uint8Array([4]));
-                }
-                last_esp32_cmd = 4;
             } else {
                 addLog("▶️ RESUMING MOVEMENT", "line-info");
                 gsap.fromTo(btn, 

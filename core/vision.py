@@ -177,6 +177,8 @@ class VisionTracker:
                     r_sh = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value]
                     l_hi = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
                     r_hi = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
+                    l_kn = landmarks[mp_pose.PoseLandmark.LEFT_KNEE.value]
+                    r_kn = landmarks[mp_pose.PoseLandmark.RIGHT_KNEE.value]
                     l_an = landmarks[mp_pose.PoseLandmark.LEFT_ANKLE.value]
                     r_an = landmarks[mp_pose.PoseLandmark.RIGHT_ANKLE.value]
 
@@ -212,10 +214,43 @@ class VisionTracker:
 
                     # 3. Whole Body & Exercise (Optional but kept for clinical)
                     vision_data["whole_body_visible"] = l_an.visibility > VIS_THRESH and r_an.visibility > VIS_THRESH
-                    # Squat logic (skipped if hips invisible)
-                    if l_hi.visibility > VIS_THRESH and l_an.visibility > VIS_THRESH:
-                        # ... EMA squat same as before ...
-                        pass
+                    # Squat angle (knee flexion) with EMA smoothing
+                    knee_angles = []
+                    if (
+                        l_hi.visibility > VIS_THRESH and
+                        l_kn.visibility > VIS_THRESH and
+                        l_an.visibility > VIS_THRESH
+                    ):
+                        knee_angles.append(calculate_angle(l_hi, l_kn, l_an))
+                    if (
+                        r_hi.visibility > VIS_THRESH and
+                        r_kn.visibility > VIS_THRESH and
+                        r_an.visibility > VIS_THRESH
+                    ):
+                        knee_angles.append(calculate_angle(r_hi, r_kn, r_an))
+                    if knee_angles:
+                        raw_squat = float(sum(knee_angles) / len(knee_angles))
+                        self._ema_squat = (self._ema_alpha * raw_squat) + ((1.0 - self._ema_alpha) * self._ema_squat)
+                        vision_data["squat_angle"] = round(self._ema_squat, 2)
+
+                    # Arm raise / side-reach signal from shoulder elevation angle
+                    arm_angles = []
+                    if (
+                        l_el.visibility > VIS_THRESH and
+                        l_sh.visibility > VIS_THRESH and
+                        l_hi.visibility > VIS_THRESH
+                    ):
+                        arm_angles.append(calculate_angle(l_el, l_sh, l_hi))
+                    if (
+                        r_el.visibility > VIS_THRESH and
+                        r_sh.visibility > VIS_THRESH and
+                        r_hi.visibility > VIS_THRESH
+                    ):
+                        arm_angles.append(calculate_angle(r_el, r_sh, r_hi))
+                    if arm_angles:
+                        raw_arm = float(sum(arm_angles) / len(arm_angles))
+                        self._ema_arm = (self._ema_alpha * raw_arm) + ((1.0 - self._ema_alpha) * self._ema_arm)
+                        vision_data["arm_angle"] = round(self._ema_arm, 2)
 
                 except Exception as e:
                     logger.error(f"Pose data extraction error: {e}")
