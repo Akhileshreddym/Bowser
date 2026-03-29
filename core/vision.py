@@ -31,7 +31,7 @@ class VisionTracker:
         self.lock = threading.Lock()
         self.camera_index = camera_index
         self.cap = cv2.VideoCapture(self.camera_index)
-        self.pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7)
+        self.pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
         self.latest_data = {"squat_angle": 180, "arm_angle": 180, "center_x": 0.5, "center_y": 0.5, "distance_depth": 128}
         # Exponential moving average for angle smoothing
         self._ema_squat = 180.0
@@ -107,7 +107,7 @@ class VisionTracker:
         results = self.pose.process(image_rgb)
         image_rgb.flags.writeable = True
         
-        VIS_THRESH = 0.65  # Higher threshold = fewer ghost detections
+        VIS_THRESH = 0.5  # Lower threshold for better detection
         vision_data = {"squat_angle": 180, "arm_angle": 180, "center_x": 0.5, "shoulder_width": 0.2}
         
         if results.pose_landmarks:
@@ -185,21 +185,35 @@ class VisionTracker:
                     l_wrist = landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value]
                     r_wrist = landmarks[mp_pose.PoseLandmark.RIGHT_WRIST.value]
 
-                    def horizontal_alignment(a, b):
-                        return abs(a.y - b.y) < 0.1 and abs(a.x - b.x) > 0.2
+                    # Check if arms are extended (elbow angle > 150 degrees)
+                    left_arm_extended = False
+                    right_arm_extended = False
+                    if l_elbow.visibility > VIS_THRESH and l_wrist.visibility > VIS_THRESH and left_shoulder.visibility > VIS_THRESH:
+                        elbow_angle = calculate_angle(left_shoulder, l_elbow, l_wrist)
+                        left_arm_extended = elbow_angle > 150
+                    if r_elbow.visibility > VIS_THRESH and r_wrist.visibility > VIS_THRESH and right_shoulder.visibility > VIS_THRESH:
+                        elbow_angle = calculate_angle(right_shoulder, r_elbow, r_wrist)
+                        right_arm_extended = elbow_angle > 150
 
-                    left_arm_horizontal = (l_elbow.visibility > VIS_THRESH and l_wrist.visibility > VIS_THRESH and
-                                           horizontal_alignment(left_shoulder, l_elbow) and horizontal_alignment(l_elbow, l_wrist))
-                    right_arm_horizontal = (r_elbow.visibility > VIS_THRESH and r_wrist.visibility > VIS_THRESH and
-                                            horizontal_alignment(right_shoulder, r_elbow) and horizontal_alignment(r_elbow, r_wrist))
+                    # Check if arms are horizontal (shoulder-elbow angle around 90 degrees)
+                    left_arm_horizontal = False
+                    right_arm_horizontal = False
+                    if l_hip.visibility > VIS_THRESH and left_shoulder.visibility > VIS_THRESH and l_elbow.visibility > VIS_THRESH:
+                        shoulder_angle = calculate_angle(l_hip, left_shoulder, l_elbow)
+                        left_arm_horizontal = 70 < shoulder_angle < 110
+                    if r_hip.visibility > VIS_THRESH and right_shoulder.visibility > VIS_THRESH and r_elbow.visibility > VIS_THRESH:
+                        shoulder_angle = calculate_angle(r_hip, right_shoulder, r_elbow)
+                        right_arm_horizontal = 70 < shoulder_angle < 110
 
-                    vision_data["t_pose"] = left_arm_horizontal and right_arm_horizontal
+                    vision_data["t_pose"] = left_arm_extended and right_arm_extended and left_arm_horizontal and right_arm_horizontal
                     cv2.putText(image, f"T-Pose: {vision_data['t_pose']}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
                     
             except Exception as e:
                 pass
                 
         self.latest_data = vision_data
+        
+        vision_data["person_detected"] = results.pose_landmarks is not None
         
         # Encode as JPEG
         ret, buffer = cv2.imencode('.jpg', image)

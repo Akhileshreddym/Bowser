@@ -63,6 +63,7 @@ class AppState:
         self.latest_audio_url = ""
         self.is_active = False
         self.target_locked = False
+        self.follow_enabled = True
         self.kid_speech = ""
         self.session_id = "session_default"
 
@@ -223,7 +224,7 @@ def generate_video():
                 if main_loop is not None:
                     asyncio.run_coroutine_threadsafe(send_command(4), main_loop)
 
-        if state.target_locked:
+        if state.target_locked and state.follow_enabled:
             # Call the pacer tool function directly (deterministic, no LLM needed)
             result = calculate_shadow_drive(
                 center_x=vision_data.get("center_x", 0.5),
@@ -258,6 +259,7 @@ async def set_esp32(data: dict):
 @app.post("/api/follow/unlock")
 async def follow_unlock():
     """Explicitly release following lock, requiring new T-pose to resume."""
+    state.follow_enabled = False
     state.target_locked = False
     state.is_active = False
     state.director_dialogue = "Follow target released. Perform T-pose to re-lock."

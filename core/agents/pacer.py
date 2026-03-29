@@ -26,58 +26,40 @@ def translate_intent_to_drive(intent_command: str) -> dict:
     return {"roomba_command": f"ROOMBA_CMD: {cmd}"}
 
 def calculate_shadow_drive(center_x: float, depth: float, shoulder_width: float = 0.2) -> dict:
-    """Calculates continuous Roomba drive output to follow a person.
+    """Calculates continuous Roomba drive output to approach a person to 2 ft.
 
-    Uses horizontal position and depth to steer towards the target location.
-    If multiple people are in frame (wide shoulder width), the robot will behave cautiously.
+    Uses horizontal position and depth to steer towards the target location at 2 ft distance.
 
     Args:
         center_x: Normalized horizontal center (0.0=left, 1.0=right).
-        depth: Depth estimation value where larger means closer.
-        shoulder_width: Normalized shoulder width; very large values usually indicate multiple people.
+        depth: Depth estimation value.
+        shoulder_width: Normalized shoulder width.
 
     Returns:
         dict: Contains 'drive_command' with the drive string.
     """
-    # target region is center and medium distance
-    target_center = 0.5
-    target_depth = 150.0
+    target_depth = 90.0  # Approximate 2 ft in depth units
 
-    # Minimal distance safety (2ft rule): if too close in depth, go backwards
-    min_depth_for_2ft = 90.0  # empirical, adjust to camera/depth scale
-
-    if depth >= min_depth_for_2ft:
-        # too close: retreat
-        return {"drive_command": "drive -40,0"}
-
-    # multi-person caution: if shoulder width is large, slow down and keep center
+    # Multi-person caution
     if shoulder_width > 0.3:
         return {"drive_command": "drive 0,0"}
 
-    # proportional control for smoother tracking
-    x_error = center_x - target_center
+    # Proportional control
+    x_error = center_x - 0.5
     depth_error = depth - target_depth
 
-    # Rotation command to point toward person (left/right)
-    # Positive for left turn, negative for right turn
-    turn = int(max(-80, min(80, -x_error * 220)))
+    turn = -x_error * 50  # Turn gain
+    velocity = -depth_error * 0.5  # Velocity gain
 
-    # Forward/backward speed: positive = forward (approach), negative = back away
-    base_speed = int(max(-100, min(100, -depth_error * 0.7)))
+    # Clamp
+    velocity = max(-50, min(50, int(velocity)))
+    turn = max(-50, min(50, int(turn)))
 
-    # Dead zone around ideal window to avoid oscillation
-    if abs(x_error) < 0.05 and abs(depth_error) < 15:
+    # Dead zone
+    if abs(velocity) < 5 and abs(turn) < 5:
         return {"drive_command": "drive 0,0"}
 
-    # If we're mostly aligned, keep straight ahead without steering jitter
-    if abs(x_error) < 0.1:
-        turn = 0
-
-    # Convert tiny residual values to significant movement
-    if base_speed == 0 and abs(depth_error) > 15:
-        base_speed = 30 if depth_error < 0 else -30
-
-    return {"drive_command": f"drive {base_speed},{turn}"}
+    return {"drive_command": f"drive {velocity},{turn}"}
 
 pacer_agent = Agent(
     name="pacer_agent",

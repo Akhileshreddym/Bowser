@@ -275,7 +275,7 @@
                 <button class="btn btn-accent" onclick="unlockTarget()" style="margin-left: 6px; background: linear-gradient(135deg, rgba(248,209,96,0.12) 0%, rgba(248,209,96,0.05) 100%); border-color: rgba(248,209,96,0.2); color: #facc15;">
                     🔓 Unlock Target
                 </button>
-                <span id="follow-status" style="font-size:12px; color:#9ca3af; padding-left:8px;">Target: unlocked</span>
+                <span id="follow-status" style="font-size:12px; color:#9ca3af; padding-left:8px;">Following: enabled</span>
             </div>
         </div>
 
@@ -421,7 +421,7 @@
                 gsap.fromTo(el, { scale: 1.6, color: "#fbbf24" }, { scale: 1, color: "#38bdf8", duration: 0.5, ease: "elastic.out(1, 0.4)" });
             }
 
-            // Follow target status
+            // Follow status
             if (state.target_locked !== undefined) {
                 const lockText = state.target_locked ? 'Target: locked' : 'Target: unlocked';
                 document.getElementById('follow-status').innerText = lockText;
