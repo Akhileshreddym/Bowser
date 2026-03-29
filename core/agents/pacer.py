@@ -43,10 +43,10 @@ def calculate_shadow_drive(
     # Velocity control based on mode
     velocity = 0
     
-    # Target Values for 1.5ft (Slightly further for safety)
-    TARGET_SHOULDER_WIDTH = 0.18
-    TOO_CLOSE_SHOULDER_WIDTH = 0.24
-    TARGET_DEPTH = 145.0
+    # Target Values for 2ft (Target Social Distance)
+    TARGET_SHOULDER_WIDTH = 0.16
+    TOO_CLOSE_SHOULDER_WIDTH = 0.22
+    TARGET_DEPTH = 135.0
     
     # ── EMERGENCY STOP / SAFETY ──
     # 1. YOLO Height: If person takes up >85% of frame, they are TOO CLOSE
@@ -54,29 +54,21 @@ def calculate_shadow_drive(
     # 2. Depth Map: If median depth is very close (>220 disparity)
     d_v = depth
     
-    if y_h > 0.85 or d_v > 225:
+    if y_h > 0.85 or d_v > 220 or shoulder_width > TOO_CLOSE_SHOULDER_WIDTH:
         # HARD STOP
         return {"drive_command": "drive 0,0"}
 
     if mode == "follow":
-        # Active following: target a specific depth/distance
+        # Follow mode: keep a specific distance
         target = TARGET_DEPTH if whole_body_visible else TARGET_DEPTH - 20
         depth_error = depth - target
         velocity = -depth_error * 0.4
     else:
-        # Default "Approach" mode: go closer until 1.5ft
-        if not whole_body_visible:
-            if shoulder_width > TOO_CLOSE_SHOULDER_WIDTH:
-                velocity = -35 
-            else:
-                velocity = 20
+        # "Approach" mode: Approach slowly to 2ft and then STOP
+        if shoulder_width < TARGET_SHOULDER_WIDTH:
+            velocity = 20 # Decelerated approach speed
         else:
-            if shoulder_width < TARGET_SHOULDER_WIDTH:
-                velocity = 25 
-            elif shoulder_width > TOO_CLOSE_SHOULDER_WIDTH:
-                velocity = -35 
-            else:
-                velocity = 0
+            velocity = 0 # BRAKE APPLIED (Reached 2ft)
 
     # Multi-person or extreme proximity caution
     if shoulder_width > 0.4:

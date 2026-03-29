@@ -39,21 +39,29 @@ You may be able to resolve this warning by setting `model_config['protected_name
   warnings.warn(
 MCP requires Python 3.10 or above. Please upgrade your Python version in order to use it.
 WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-I0000 00:00:1774771637.932851 1161755 gl_context.cc:357] GL version: 2.1 (2.1 Metal - 90.5), renderer: Apple M3 Pro
+I0000 00:00:1774790451.529782 1414360 gl_context.cc:357] GL version: 2.1 (2.1 Metal - 90.5), renderer: Apple M3 Pro
 INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
 INFO:core.vision:YOLOv8 model loaded successfully (CPU mode)
-W0000 00:00:1774771637.991749 1162151 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
-W0000 00:00:1774771637.999638 1162152 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1774790451.585506 1414727 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1774790451.591105 1414728 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
 Some weights of DPTForDepthEstimation were not initialized from the model checkpoint at Intel/dpt-large and are newly initialized: ['neck.fusion_stage.layers.0.residual_layer1.convolution1.bias', 'neck.fusion_stage.layers.0.residual_layer1.convolution1.weight', 'neck.fusion_stage.layers.0.residual_layer1.convolution2.bias', 'neck.fusion_stage.layers.0.residual_layer1.convolution2.weight']
 You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
 Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
 Device set to use cpu
 WARNING:google_adk.google.adk.runners:App name mismatch detected. The runner is configured with app name "therapy_app", but the root agent was loaded from "/Users/akhilesh/Bowser/Bowser/venv/lib/python3.9/site-packages/google/adk/agents", which implies app name "agents".
-INFO:     Started server process [62840]
+INFO:     Started server process [8766]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:51774 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51774 - "GET /video_feed HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51776 - "WebSocket /ws" [accepted]
+INFO:     127.0.0.1:55972 - "WebSocket /ws" [accepted]
 INFO:     connection open
+INFO:     127.0.0.1:55973 - "GET /api/follow/unlock HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:55977 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55977 - "GET /video_feed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55978 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:55980 - "GET /remote HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:core.vision:Switching camera to 2
+INFO:     127.0.0.1:55981 - "POST /api/camera/2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55981 - "GET /video_feed?t=1774790483813 HTTP/1.1" 200 OK
