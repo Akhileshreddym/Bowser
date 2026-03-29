@@ -6,6 +6,7 @@
     <title>Therapy System — Dashboard</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -207,6 +208,21 @@
         .terminal-body .line-err { color: var(--rose); }
         .terminal-body .line-info { color: var(--accent); }
 
+        /* ─── Kill Button ─── */
+        .kill-btn {
+            position: fixed; bottom: 32px; right: 32px; z-index: 999;
+            width: 72px; height: 72px; border-radius: 50%;
+            background: linear-gradient(135deg, #dc2626, #991b1b);
+            border: 3px solid rgba(255,255,255,0.15);
+            color: white; font-size: 11px; font-weight: 800; letter-spacing: 0.05em;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 20px rgba(220, 38, 38, 0.4), 0 0 0 0 rgba(220, 38, 38, 0.3);
+            transition: all 0.2s;
+            text-transform: uppercase;
+        }
+        .kill-btn:hover { transform: scale(1.1); box-shadow: 0 6px 30px rgba(220, 38, 38, 0.6); }
+        .kill-btn:active { transform: scale(0.95); }
+
         /* ─── Intro Overlay ─── */
         .intro-overlay {
             position: fixed; inset: 0; z-index: 100;
@@ -244,13 +260,17 @@
                 <div class="sub">Pediatric Rehabilitation System</div>
             </div>
             <div style="display: flex; gap: 10px;">
-                <button class="btn btn-accent" onclick="scanBracelet('patient_123')">
+                <button class="btn btn-accent" onclick="scanBracelet('akhilesh')">
                     <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0H5a2 2 0 01-2-2v-4m6 6h10a2 2 0 002-2v-4"/></svg>
-                    Scan Tommy
+                    Scan Akhilesh (Arm Raises X20)
                 </button>
-                <button class="btn btn-rose" onclick="scanBracelet('patient_456')">
+                <button class="btn btn-rose" onclick="scanBracelet('bailey')">
                     <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0H5a2 2 0 01-2-2v-4m6 6h10a2 2 0 002-2v-4"/></svg>
-                    Scan Sarah
+                    Scan Bailey (Squats X20)
+                </button>
+                <button class="btn btn-accent" onclick="scanBracelet('john')">
+                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0H5a2 2 0 01-2-2v-4m6 6h10a2 2 0 002-2v-4"/></svg>
+                    Scan John (Side Reach X20)
                 </button>
             </div>
         </div>
@@ -267,9 +287,9 @@
                         <div class="video-badge"><span class="dot"></span> LIVE</div>
                         <select class="cam-select" id="camera-select" onchange="changeCamera(this.value)">
                             <option value="off">Camera Off</option>
-                            <option value="1">iPhone 17 Pro Max</option>
-                            <option value="2">Mac</option>
-                            <option value="3">iPhone 14 Pro Max</option>
+                            <option value="1">Mac</option>
+                            <option value="2">iPhone 14 Pro Max</option>
+                            <option value="3">iPhone 17 Pro Max</option>
                         </select>
                         <img id="video-feed" src="/video_feed" alt="Video Feed" onerror="this.onerror=null; this.src='data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22400%22%3E%3Crect fill=%22%23111%22 width=%22640%22 height=%22400%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23333%22 font-family=%22Inter%22 font-size=%2214%22%3EFEED OFFLINE%3C/text%3E%3C/svg%3E'">
                     </div>
@@ -329,6 +349,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Emergency Kill Button -->
+    <button class="kill-btn" id="kill-btn" onclick="emergencyStop()" title="Emergency Stop">KILL</button>
 
     <!-- Hidden Audio Player -->
     <audio id="tts-player" class="hidden"></audio>
@@ -393,8 +416,18 @@
             document.getElementById("assistant-command").innerText = state.command || "[IDLE]";
 
             // Terminal
-            if (state.roomba && terminalOutput.lastChild?.innerText !== `→ ${state.roomba}`) {
-                addLog(`→ ${state.roomba}`, "");
+            if (state.roomba_output !== lastOutput) {
+                lastOutput = state.roomba_output;
+                addLog(`⚙️ CMD: ${lastOutput}`, "");
+                
+                // Proxy command directly to ESP32
+                const cmdByte = driveStringToByte(lastOutput);
+                if (cmdByte !== last_esp32_cmd) {
+                    if (esp32_ws && esp32_ws.readyState === WebSocket.OPEN) {
+                        esp32_ws.send(new Uint8Array([cmdByte]));
+                        last_esp32_cmd = cmdByte;
+                    }
+                }
             }
 
             // Audio
@@ -442,6 +475,63 @@
                     }});
                 })
                 .catch(err => addLog(`✗ Camera error: ${err}`, "line-err"));
+        }
+
+        // ═══════════════════════════════════════════
+        // ESP32 DIRECT BROWSER WEBSOCKET (STABILITY FIX)
+        // ═══════════════════════════════════════════
+        const ESP32_URL = "ws://172.20.10.2/control";
+        let esp32_ws = null;
+        let last_esp32_cmd = -1;
+
+        function connectESP32() {
+            if (esp32_ws) return;
+            esp32_ws = new WebSocket(ESP32_URL);
+            esp32_ws.binaryType = "arraybuffer";
+
+            esp32_ws.onopen = () => {
+                addLog(`⚙️ ESP32 Connected (${ESP32_URL})`, "line-info");
+            };
+            esp32_ws.onclose = () => {
+                addLog(`⚠️ ESP32 Disconnected. Reconnecting...`, "line-err");
+                esp32_ws = null;
+                setTimeout(connectESP32, 3000);
+            };
+            esp32_ws.onerror = (err) => {
+                esp32_ws.close();
+            };
+        }
+
+        function driveStringToByte(driveStr) {
+            if (!driveStr || !driveStr.includes("drive")) return 4;
+            const parts = driveStr.replace("drive", "").trim().split(",");
+            if (parts.length !== 2) return 4;
+            const vel = parseInt(parts[0]);
+            const turn = parseInt(parts[1]);
+            
+            if (vel === 0 && turn === 0) return 4;
+            if (Math.abs(turn) > Math.abs(vel)) return turn > 0 ? 2 : 3;
+            return vel > 0 ? 0 : 1;
+        }
+
+        connectESP32();
+
+        function emergencyStop() {
+            addLog("🛑 EMERGENCY STOP ACTIVATED", "line-err");
+            const btn = document.getElementById("kill-btn");
+            gsap.fromTo(btn, 
+                { boxShadow: "0 0 0 0 rgba(220,38,38,0.8)" },
+                { boxShadow: "0 0 40px 20px rgba(220,38,38,0)", duration: 0.6 }
+            );
+            
+            // Send Stop to ESP32 directly!
+            if (esp32_ws && esp32_ws.readyState === WebSocket.OPEN) {
+                esp32_ws.send(new Uint8Array([4]));
+            }
+            last_esp32_cmd = 4;
+            
+            // Tell backend to halt session
+            fetch("/api/esp32/stop", { method: "POST" });
         }
 
         // ═══════════════════════════════════════════
@@ -493,12 +583,67 @@
         // ═══════════════════════════════════════════
         document.querySelectorAll(".stat-card").forEach(card => {
             card.addEventListener("mouseenter", () => {
-                gsap.to(card.querySelector(".stat-value"), { scale: 1.1, duration: 0.3, ease: "power2.out" });
+                // existing hover animation code
             });
             card.addEventListener("mouseleave", () => {
-                gsap.to(card.querySelector(".stat-value"), { scale: 1, duration: 0.3, ease: "power2.out" });
+                // no-op
             });
         });
+
+        // ═══════════════════════════════════════════
+        // AUTOMATIC QR SCANNER LOOP
+        // ═══════════════════════════════════════════
+        const knownProfiles = { akhilesh: true, bailey: true, john: true };
+        let lastQrValue = null;
+        let lastQrAt = 0;
+
+        const qrVideo = document.createElement('video');
+        qrVideo.setAttribute('playsinline', 'true');
+        qrVideo.style.position = 'fixed';
+        qrVideo.style.width = '1px';
+        qrVideo.style.height = '1px';
+        qrVideo.style.opacity = '0';
+        document.body.appendChild(qrVideo);
+
+        const qrCanvas = document.createElement('canvas');
+        const qrContext = qrCanvas.getContext('2d');
+
+        function startQrScanner() {
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+                .then(stream => {
+                    qrVideo.srcObject = stream;
+                    qrVideo.play();
+                    const scanLoop = () => {
+                        if (qrVideo.readyState === qrVideo.HAVE_ENOUGH_DATA) {
+                            qrCanvas.width = qrVideo.videoWidth;
+                            qrCanvas.height = qrVideo.videoHeight;
+                            qrContext.drawImage(qrVideo, 0, 0, qrCanvas.width, qrCanvas.height);
+                            const imageData = qrContext.getImageData(0, 0, qrCanvas.width, qrCanvas.height);
+                            const qrCode = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+
+                            if (qrCode && qrCode.data) {
+                                const value = String(qrCode.data).trim().toLowerCase();
+                                if (knownProfiles[value]) {
+                                    const now = Date.now();
+                                    if (value !== lastQrValue || (now - lastQrAt) > 3000) {
+                                        lastQrValue = value;
+                                        lastQrAt = now;
+                                        addLog(`📷 QR matched: ${value}`, 'line-info');
+                                        scanBracelet(value);
+                                    }
+                                }
+                            }
+                        }
+                        requestAnimationFrame(scanLoop);
+                    };
+                    requestAnimationFrame(scanLoop);
+                })
+                .catch(err => {
+                    addLog(`✗ QR scanner unavailable: ${err}`, 'line-err');
+                });
+        }
+
+        startQrScanner();
 
         // ═══════════════════════════════════════════
         // AMBIENT ORB DRIFT

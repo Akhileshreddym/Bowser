@@ -19,6 +19,7 @@ from core.agents import (
     pacer_agent, calculate_shadow_drive
 )
 from core.audio import generate_bowser_audio
+from core.hardware import send_command, send_stop, drive_string_to_command, configure_esp32
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class AppState:
         self.roomba_output = "drive 0,0"
         self.latest_audio_url = ""
         self.is_active = False
+        self.target_locked = False
         self.kid_speech = ""
         self.session_id = "session_default"
 
@@ -76,7 +78,9 @@ async def broadcast_state():
         "command": state.director_command,
         "dialogue": state.director_dialogue,
         "roomba": state.roomba_output,
-        "audio_url": state.latest_audio_url
+        "audio_url": state.latest_audio_url,
+        "target_locked": state.target_locked,
+        "is_active": state.is_active
     })
     state.latest_audio_url = ""
     for connection in active_connections:
@@ -94,13 +98,17 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_text()
             cmd = json.loads(data)
-            if cmd.get("action") == "scan_bracelet":
-                patient_id = cmd.get("patient_id", "patient_123")
+            if cmd.get("action") in {"scan_bracelet", "scan_qr", "scan_profile"}:
+                patient_id = cmd.get("patient_id", "akhilesh")
                 state.patient_info = get_patient_record(patient_id)
                 state.is_active = True
+                state.target_locked = False
+                state.director_dialogue = f"Patient {state.patient_info.get('name')} selected. Perform T-pose to lock follow target."
+
                 # Reset clinical tracking for new patient
                 reset_clinical_state()
                 state.clinical_state = _clinical_state.copy()
+
                 # Create a fresh ADK session for this patient
                 state.session_id = f"session_{patient_id}_{int(time.time())}"
                 session = await session_service.create_session(
@@ -203,15 +211,32 @@ def generate_video():
 
         state.clinical_state = new_clinical_state.copy()
 
-        if state.is_active:
+        if not state.target_locked:
+            # Wait until a user explicitly assumes the T-pose to lock target
+            if vision_data.get("t_pose"):
+                state.target_locked = True
+                state.is_active = True
+                state.director_dialogue = "Target locked. Following enabled."
+            else:
+                # Not locked yet: stay stopped
+                state.roomba_output = "drive 0,0"
+                if main_loop is not None:
+                    asyncio.run_coroutine_threadsafe(send_command(4), main_loop)
+
+        if state.target_locked:
             # Call the pacer tool function directly (deterministic, no LLM needed)
             result = calculate_shadow_drive(
                 center_x=vision_data.get("center_x", 0.5),
-                depth=vision_data.get("distance_depth", 128)
+                depth=vision_data.get("distance_depth", 128),
+                shoulder_width=vision_data.get("shoulder_width", 0.2)
             )
             new_roomba_out = result["drive_command"]
             if new_roomba_out != state.roomba_output:
                 state.roomba_output = new_roomba_out
+                # Send the command to ESP32
+                if main_loop is not None:
+                    cmd = drive_string_to_command(new_roomba_out)
+                    asyncio.run_coroutine_threadsafe(send_command(cmd), main_loop)
 
         if frame_bytes is None:
             time.sleep(0.1)
@@ -225,6 +250,29 @@ def set_camera(index: str):
     tracker.set_camera(index)
     return {"status": "ok", "camera_index": index}
 
+@app.post("/api/esp32")
+async def set_esp32(data: dict):
+    """(Deprecated) ESP32 is now driven by frontend JS directly."""
+    return {"status": "ok"}
+
+@app.post("/api/follow/unlock")
+async def follow_unlock():
+    """Explicitly release following lock, requiring new T-pose to resume."""
+    state.target_locked = False
+    state.is_active = False
+    state.director_dialogue = "Follow target released. Perform T-pose to re-lock."
+    state.roomba_output = "drive 0,0"
+    await send_stop()
+    return {"status": "unlocked"}
+
+@app.post("/api/esp32/stop")
+async def esp32_stop():
+    """Emergency stop the Roomba."""
+    await send_stop()
+    state.roomba_output = "drive 0,0"
+    state.is_active = False
+    return {"status": "stopped"}
+
 @app.get("/video_feed")
 def video_feed():
     return StreamingResponse(generate_video(), media_type="multipart/x-mixed-replace; boundary=frame")
@@ -232,6 +280,20 @@ def video_feed():
 @app.get("/")
 def read_root():
     return FileResponse("static/index.html")
+
+@app.get("/remote")
+def remote_control():
+    return FileResponse("static/remote.html")
+
+@app.post("/api/roomba/{cmd}")
+async def roomba_command(cmd: int):
+    """(Deprecated) Handled by frontend directly."""
+    names = ["FORWARD", "BACKWARD", "LEFT", "RIGHT", "STOP"]
+    return {"status": "ok", "command": names[cmd] if 0 <= cmd <= 4 else "UNKNOWN"}
+
+@app.get("/api/roomba/ping")
+async def roomba_ping():
+    return {"status": "ok"}
 
 async def periodic_broadcast():
     while True:

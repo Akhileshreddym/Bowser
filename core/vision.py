@@ -178,6 +178,21 @@ class VisionTracker:
                     depth = self.latest_data.get("distance_depth", 0)
                     vision_data["distance_depth"] = depth
                     cv2.putText(image, f"Depth: {depth}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+                    # T-pose detection (both arms held out horizontally)
+                    l_elbow = landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value]
+                    r_elbow = landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value]
+                    l_wrist = landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value]
+                    r_wrist = landmarks[mp_pose.PoseLandmark.RIGHT_WRIST.value]
+
+                    def horizontal_alignment(a, b):
+                        return abs(a.y - b.y) < 0.08 and abs(a.x - b.x) > 0.25
+
+                    left_arm_horizontal = horizontal_alignment(left_shoulder, l_elbow) and horizontal_alignment(l_elbow, l_wrist)
+                    right_arm_horizontal = horizontal_alignment(right_shoulder, r_elbow) and horizontal_alignment(r_elbow, r_wrist)
+
+                    vision_data["t_pose"] = left_arm_horizontal and right_arm_horizontal
+                    cv2.putText(image, f"T-Pose: {vision_data['t_pose']}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
                     
             except Exception as e:
                 pass

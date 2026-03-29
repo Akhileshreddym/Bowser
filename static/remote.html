@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>B.O.W.S.E.R. — Remote Control</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0a0f;
+            --surface: rgba(255,255,255,0.04);
+            --border: rgba(255,255,255,0.06);
+            --text: rgba(255,255,255,0.9);
+            --text-dim: rgba(255,255,255,0.4);
+            --accent: #38bdf8;
+            --green: #34d399;
+            --rose: #fb7185;
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100dvh;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            overflow: hidden;
+            -webkit-user-select: none; user-select: none;
+            touch-action: manipulation;
+        }
+
+        /* Ambient background */
+        .ambient {
+            position: fixed; inset: 0; z-index: 0; pointer-events: none;
+            background:
+                radial-gradient(ellipse 80% 60% at 30% 20%, rgba(56,189,248,0.05) 0%, transparent 50%),
+                radial-gradient(ellipse 60% 50% at 70% 80%, rgba(168,85,247,0.04) 0%, transparent 50%);
+        }
+
+        .container {
+            position: relative; z-index: 2;
+            display: flex; flex-direction: column;
+            align-items: center; gap: 28px;
+            padding: 24px;
+        }
+
+        /* Title */
+        .title {
+            font-size: 13px; font-weight: 600; letter-spacing: 0.2em;
+            text-transform: uppercase; color: var(--text-dim);
+        }
+        .title span { color: var(--accent); }
+
+        /* Status indicator */
+        .status {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 12px; color: var(--text-dim);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--rose);
+            transition: background 0.3s;
+        }
+        .status-dot.connected { background: var(--green); }
+
+        /* D-Pad layout */
+        .dpad {
+            display: grid;
+            grid-template-areas:
+                ". up ."
+                "left stop right"
+                ". down .";
+            grid-template-columns: repeat(3, 88px);
+            grid-template-rows: repeat(3, 88px);
+            gap: 8px;
+        }
+
+        .dpad-btn {
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: var(--surface);
+            backdrop-filter: blur(20px);
+            color: var(--text);
+            font-size: 28px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.15s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .dpad-btn:active, .dpad-btn.active {
+            background: rgba(56,189,248,0.15);
+            border-color: rgba(56,189,248,0.3);
+            transform: scale(0.94);
+            box-shadow: 0 0 20px rgba(56,189,248,0.15);
+        }
+        .dpad-btn.stop-btn {
+            border-radius: 50%;
+            background: linear-gradient(135deg, rgba(220,38,38,0.2), rgba(220,38,38,0.1));
+            border-color: rgba(220,38,38,0.3);
+            font-size: 14px;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            color: var(--rose);
+        }
+        .dpad-btn.stop-btn:active, .dpad-btn.stop-btn.active {
+            background: rgba(220,38,38,0.4);
+            box-shadow: 0 0 30px rgba(220,38,38,0.3);
+        }
+
+        .btn-up    { grid-area: up; }
+        .btn-down  { grid-area: down; }
+        .btn-left  { grid-area: left; }
+        .btn-right { grid-area: right; }
+        .btn-stop  { grid-area: stop; }
+
+        /* Keyboard hints */
+        .key-hints {
+            display: flex; gap: 16px;
+            font-size: 11px; color: var(--text-dim);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .key-hint kbd {
+            display: inline-block;
+            padding: 2px 6px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 10px;
+            background: var(--surface);
+            margin-right: 4px;
+        }
+
+        /* Command log */
+        .log {
+            width: 300px; max-height: 120px;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-dim);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            background: var(--surface);
+            backdrop-filter: blur(20px);
+        }
+        .log-entry { padding: 2px 0; }
+        .log-entry.sent { color: var(--accent); }
+        .log-entry.err { color: var(--rose); }
+
+        /* Back link */
+        .back-link {
+            font-size: 12px; color: var(--text-dim);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        .back-link:hover { color: var(--accent); }
+
+        @media (max-width: 400px) {
+            .dpad {
+                grid-template-columns: repeat(3, 72px);
+                grid-template-rows: repeat(3, 72px);
+                gap: 6px;
+            }
+            .dpad-btn { font-size: 22px; border-radius: 14px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="ambient"></div>
+
+    <div class="container">
+        <div class="title">B.O.W.S.E.R. — <span>Remote Control</span></div>
+
+        <div class="status">
+            <div class="status-dot" id="status-dot"></div>
+            <span id="status-text">Disconnected</span>
+        </div>
+
+        <div class="dpad">
+            <button class="dpad-btn btn-up"    id="btn-up"    data-cmd="0">▲</button>
+            <button class="dpad-btn btn-left"  id="btn-left"  data-cmd="2">◀</button>
+            <button class="dpad-btn btn-stop stop-btn" id="btn-stop" data-cmd="4">STOP</button>
+            <button class="dpad-btn btn-right" id="btn-right" data-cmd="3">▶</button>
+            <button class="dpad-btn btn-down"  id="btn-down"  data-cmd="1">▼</button>
+        </div>
+
+        <div class="key-hints">
+            <div class="key-hint"><kbd>W</kbd>/<kbd>↑</kbd> Forward</div>
+            <div class="key-hint"><kbd>S</kbd>/<kbd>↓</kbd> Back</div>
+            <div class="key-hint"><kbd>A</kbd>/<kbd>←</kbd> Left</div>
+            <div class="key-hint"><kbd>D</kbd>/<kbd>→</kbd> Right</div>
+            <div class="key-hint"><kbd>Space</kbd> Stop</div>
+        </div>
+
+        <div class="log" id="log"></div>
+
+        <a href="/" class="back-link">← Back to Dashboard</a>
+    </div>
+
+    <script>
+        const ESP32_URL = "ws://172.20.10.2/control";
+        const logEl = document.getElementById('log');
+        const dot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        let connected = false;
+        let esp32_ws = null;
+
+        function log(msg, cls = '') {
+            const div = document.createElement('div');
+            div.className = 'log-entry ' + cls;
+            div.textContent = `${new Date().toLocaleTimeString()} ${msg}`;
+            logEl.prepend(div);
+            if (logEl.children.length > 50) logEl.lastChild.remove();
+        }
+
+        function connectESP32() {
+            if (esp32_ws) return;
+            esp32_ws = new WebSocket(ESP32_URL);
+            esp32_ws.binaryType = "arraybuffer";
+
+            esp32_ws.onopen = () => {
+                connected = true;
+                dot.classList.add('connected');
+                statusText.textContent = 'Connected';
+                log(`Connected to ESP32`, 'sent');
+            };
+            esp32_ws.onclose = () => {
+                connected = false;
+                dot.classList.remove('connected');
+                statusText.textContent = 'Disconnected';
+                log(`Disconnected. Retrying in 3s...`, 'err');
+                esp32_ws = null;
+                setTimeout(connectESP32, 3000);
+            };
+            esp32_ws.onerror = (err) => {
+                esp32_ws.close();
+            };
+        }
+
+        connectESP32();
+
+        function sendCmd(cmd) {
+            const names = ['FORWARD', 'BACKWARD', 'LEFT', 'RIGHT', 'STOP'];
+            if (esp32_ws && esp32_ws.readyState === WebSocket.OPEN) {
+                esp32_ws.send(new Uint8Array([cmd]));
+                log(`→ ${names[cmd]}`, 'sent');
+            } else {
+                log(`✗ WS not connected`, 'err');
+            }
+        }
+
+        // Touch / click handlers (hold to repeat)
+        let holdInterval = null;
+        document.querySelectorAll('.dpad-btn').forEach(btn => {
+            const cmd = parseInt(btn.dataset.cmd);
+
+            const start = (e) => {
+                e.preventDefault();
+                btn.classList.add('active');
+                sendCmd(cmd);
+                if (cmd !== 4) {  // Don't repeat STOP
+                    // Send every 900ms to keep ESP32 3s safety timeout alive without spamming
+                    holdInterval = setInterval(() => sendCmd(cmd), 900);
+                }
+            };
+            const stop = (e) => {
+                e.preventDefault();
+                btn.classList.remove('active');
+                if (holdInterval) { clearInterval(holdInterval); holdInterval = null; }
+                if (cmd !== 4) sendCmd(4);  // Auto-stop on release
+            };
+
+            btn.addEventListener('mousedown', start);
+            btn.addEventListener('mouseup', stop);
+            btn.addEventListener('mouseleave', stop);
+            btn.addEventListener('touchstart', start, { passive: false });
+            btn.addEventListener('touchend', stop, { passive: false });
+        });
+
+        // Keyboard controls
+        const keyMap = {
+            'ArrowUp': 0, 'w': 0, 'W': 0,
+            'ArrowDown': 1, 's': 1, 'S': 1,
+            'ArrowLeft': 2, 'a': 2, 'A': 2,
+            'ArrowRight': 3, 'd': 3, 'D': 3,
+            ' ': 4
+        };
+        const btnMap = { 0: 'btn-up', 1: 'btn-down', 2: 'btn-left', 3: 'btn-right', 4: 'btn-stop' };
+        const keysDown = new Set();
+
+        document.addEventListener('keydown', (e) => {
+            if (e.repeat) return;
+            const cmd = keyMap[e.key];
+            if (cmd !== undefined) {
+                e.preventDefault();
+                if (!keysDown.has(e.key)) {
+                    keysDown.add(e.key);
+                    document.getElementById(btnMap[cmd]).classList.add('active');
+                    sendCmd(cmd);
+                }
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            const cmd = keyMap[e.key];
+            if (cmd !== undefined) {
+                keysDown.delete(e.key);
+                document.getElementById(btnMap[cmd]).classList.remove('active');
+                if (cmd !== 4) sendCmd(4);  // Auto-stop on key release
+            }
+        });
+
+        // Auto-reconnect managed by connectESP32() onclose handler
+    </script>
+</body>
+</html>

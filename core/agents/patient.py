@@ -5,17 +5,23 @@ from google.adk.agents import Agent
 # ──────────────────────────────────────────
 # Mock patient database
 _PATIENT_DB = {
-    "patient_123": {
-        "name": "Tommy",
-        "age": 8,
-        "therapy_goal": "Squats for leg strengthening",
-        "target_reps": 10
+    "akhilesh": {
+        "name": "Akhilesh",
+        "age": 11,
+        "therapy_goal": "Arm Raises X20",
+        "target_reps": 20
     },
-    "patient_456": {
-        "name": "Sarah",
-        "age": 10,
-        "therapy_goal": "Arm raises for shoulder mobility",
-        "target_reps": 15
+    "bailey": {
+        "name": "Bailey",
+        "age": 9,
+        "therapy_goal": "Squats X20",
+        "target_reps": 20
+    },
+    "john": {
+        "name": "John",
+        "age": 12,
+        "therapy_goal": "Side Reach X20",
+        "target_reps": 20
     }
 }
 
