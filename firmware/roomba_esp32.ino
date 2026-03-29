@@ -21,8 +21,8 @@
 #include <WebSocketsServer.h>
 
 // ─── CONFIG ───
-const char* WIFI_SSID     = "bailey_ifon";
-const char* WIFI_PASSWORD = "yayayaya";
+const char* WIFI_SSID     = "USF-eduroam-guest-Wifi";
+const char* WIFI_PASSWORD = "";
 
 WebSocketsServer webSocket = WebSocketsServer(80);
 HardwareSerial& roombaSerial = Serial2;

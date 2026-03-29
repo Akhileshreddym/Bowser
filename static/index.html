@@ -259,7 +259,7 @@
                 <h1>Therapy Dashboard</h1>
                 <div class="sub">Pediatric Rehabilitation System</div>
             </div>
-            <div style="display: flex; gap: 10px;">
+            <div style="display: flex; gap: 10px; align-items: center;">
                 <button class="btn btn-accent" onclick="scanBracelet('akhilesh')">
                     <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0H5a2 2 0 01-2-2v-4m6 6h10a2 2 0 002-2v-4"/></svg>
                     Scan Akhilesh (Arm Raises X20)
@@ -272,6 +272,10 @@
                     <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0H5a2 2 0 01-2-2v-4m6 6h10a2 2 0 002-2v-4"/></svg>
                     Scan John (Side Reach X20)
                 </button>
+                <button class="btn btn-accent" onclick="unlockTarget()" style="margin-left: 6px; background: linear-gradient(135deg, rgba(248,209,96,0.12) 0%, rgba(248,209,96,0.05) 100%); border-color: rgba(248,209,96,0.2); color: #facc15;">
+                    🔓 Unlock Target
+                </button>
+                <span id="follow-status" style="font-size:12px; color:#9ca3af; padding-left:8px;">Target: unlocked</span>
             </div>
         </div>
 
@@ -417,6 +421,12 @@
                 gsap.fromTo(el, { scale: 1.6, color: "#fbbf24" }, { scale: 1, color: "#38bdf8", duration: 0.5, ease: "elastic.out(1, 0.4)" });
             }
 
+            // Follow target status
+            if (state.target_locked !== undefined) {
+                const lockText = state.target_locked ? 'Target: locked' : 'Target: unlocked';
+                document.getElementById('follow-status').innerText = lockText;
+            }
+
             // AI
             document.getElementById("assistant-dialogue").innerText = state.dialogue;
             document.getElementById("assistant-command").innerText = state.command || "[IDLE]";
@@ -467,22 +477,34 @@
         }
 
         function changeCamera(index) {
-            selectedCameraIndex = index;
             addLog(`→ Camera switching: ${index}`, "line-warn");
-
-            const img = document.getElementById("video-feed");
-            if (index === 'off') {
-                img.src = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22400%22%3E%3Crect fill=%22%23111%22 width=%22640%22 height=%22400%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23333%22 font-family=%22Inter%22 font-size=%2214%22%3EFEED OFFLINE%3C/text%3E%3C/svg%3E";
-                return;
-            }
-
             fetch(`/api/camera/${index}`, { method: "POST" })
                 .then(r => r.json())
                 .then(() => {
-                    img.src = `/video_feed?t=${Date.now()}`;
-                    addLog(`→ Camera frame source in use (${index})`, "line-info");
+                    const img = document.getElementById("video-feed");
+                    if (index === 'off') {
+                        img.src = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22400%22%3E%3Crect fill=%22%23111%22 width=%22640%22 height=%22400%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23333%22 font-family=%22Inter%22 font-size=%2214%22%3EFEED OFFLINE%3C/text%3E%3C/svg%3E";
+                    } else {
+                        img.src = `/video_feed?t=${Date.now()}`;
+                    }
+                    addLog(`→ Camera switched to ${index}`, "line-info");
                 })
                 .catch(err => addLog(`✗ Camera error: ${err}`, "line-err"));
+        }
+
+        function unlockTarget() {
+            addLog("→ Unlocking follow target...", "line-warn");
+            fetch('/api/follow/unlock', { method: 'POST' })
+                .then(r => r.json())
+                .then(resp => {
+                    if (resp.status === 'unlocked') {
+                        addLog('✅ Follow target unlocked', 'line-info');
+                        document.getElementById('follow-status').innerText = 'Target: unlocked';
+                    } else {
+                        addLog('⚠ Unable to unlock follow target', 'line-err');
+                    }
+                })
+                .catch(err => addLog(`✗ Unlock error: ${err}`, 'line-err'));
         }
 
         // ═══════════════════════════════════════════
