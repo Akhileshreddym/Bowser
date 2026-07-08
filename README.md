@@ -24,7 +24,7 @@ BOWSER is a real-time pediatric therapy system that turns exercises into an inte
 - **AI coaching** — Gemini (via Google ADK Runner) generates short, encouraging dialogue tied to live session context
 - **Voice feedback** — ElevenLabs TTS with a custom cloned voice, streamed to the browser over WebSocket
 - **Autonomous pacing** — Roomba + ESP32 follow/approach logic uses spatial tracking and depth for distance-aware movement
-- **Agent collaboration panel** — live trace of patient, clinical, director, pacer, and audio agent events for demo transparency
+- **Agent collaboration panel** — live trace of all **6 agents** (patient, clinical, assistant, director, pacer, audio) for demo transparency
 
 The **dashboard UI** (`static/index.html`) handles QR scanning, audio playback, session scorecard, and health pills. The **Python backend** (`main.py`) owns the video loop, clinical math, ADK invocation, TTS generation, and robot command authority.
 
@@ -96,7 +96,7 @@ flowchart TB
 | Computer Vision | OpenCV, MediaPipe Pose, YOLOv8n | Capture, pose landmarks, person detection |
 | Depth | Intel DPT (`dpt-large`) via Hugging Face Transformers | Async distance estimation for follow logic |
 | Clinical Logic | Deterministic Python (`clinical.py`) | Hysteresis rep counting + 0.8s debounce |
-| Agents | Google ADK (`google-adk`) | Four agent definitions; Runner invokes assistant only |
+| Agents | Google ADK (`google-adk`) | 6-agent orchestration (4 ADK definitions + director + audio); Runner invokes assistant only |
 | LLM | Gemini 2.5 Flash | Coaching dialogue + greetings |
 | TTS | ElevenLabs REST (`httpx`) | Custom voice MP3 generation |
 | Frontend | HTML5, CSS3, JavaScript | Single-page dashboard + audio queue |
@@ -195,16 +195,18 @@ This validates the **logic layer** on synthetic angle streams. Live accuracy dep
 
 ## Multi-Agent System (Google ADK)
 
-Four ADK `Agent` definitions coordinate the session. At runtime, patient/clinical/pacer logic runs as **deterministic function calls** in the video loop; only the **assistant** is invoked through the ADK `Runner`.
+BOWSER runs a **6-agent orchestration loop** visible on the dashboard agent board. Four are ADK `Agent` definitions in `core/agents/`; two more (`director`, `audio`) are orchestration roles traced in `main.py`.
 
-| Agent | Role | Runtime |
-|---|---|---|
-| `patient_agent` | Load therapy profile on scan | Direct `get_patient_record()` call |
-| `clinical_agent` | Track reps and exercise type | Direct `analyze_pose_data()` per frame |
-| `assistant_agent` | Gemini coaching dialogue | **ADK Runner** (`assistant_runner.run_async`) |
-| `pacer_agent` | Translate spatial data → drive commands | Direct `calculate_shadow_drive()` per frame |
-| `director_agent` *(trace label)* | Orchestrates ADK prompts, parses `[COMMAND]` prefix | `trigger_assistant_update()` in `main.py` |
-| `audio_agent` *(trace label)* | ElevenLabs TTS generation + playback events | `generate_bowser_audio()` + WebSocket push |
+At runtime, patient/clinical/pacer logic runs as **deterministic function calls** in the video loop; only the **assistant** is invoked through the ADK `Runner`.
+
+| # | Agent | Role | Runtime |
+|---|---|---|---|
+| 1 | `patient_agent` | Load therapy profile on QR scan | ADK definition · direct `get_patient_record()` call |
+| 2 | `clinical_agent` | Track reps and exercise type (no LLM) | ADK definition · direct `analyze_pose_data()` per frame |
+| 3 | `assistant_agent` | Gemini coaching dialogue | ADK definition · **ADK Runner** (`assistant_runner.run_async`) |
+| 4 | `pacer_agent` | Spatial data → Roomba drive commands | ADK definition · direct `calculate_shadow_drive()` per frame |
+| 5 | `director_agent` | Orchestrates ADK prompts, parses `[COMMAND]` prefix | Trace role · `trigger_assistant_update()` in `main.py` |
+| 6 | `audio_agent` | ElevenLabs TTS generation + playback events | Trace role · `generate_bowser_audio()` + WebSocket push |
 
 ### Agent-to-Agent Handoff
 
@@ -344,8 +346,9 @@ If ESP32 is unreachable, the backend runs in **simulation mode** — all logic w
 | On-device CV at ~15 FPS | **Correct** | Measured end-to-end on M3 Pro CPU |
 | Async depth for following | **Correct** | DPT runs off main thread; feeds pacer distance logic |
 | Hysteresis rep counting | **Correct** | 100% on 13 scripted test cases |
-| ADK multi-agent architecture | **Correct** | Four agent definitions with clear separation of concerns |
-| Only assistant uses ADK Runner | **Limitation** | Patient/clinical/pacer are direct function calls, not parallel LLM agents |
+| 6-agent orchestration architecture | **Correct** | Patient, clinical, assistant, director, pacer, audio — all traced live on dashboard |
+| 4 ADK `Agent()` definitions | **Correct** | `patient`, `clinical`, `assistant`, `pacer` in `core/agents/` |
+| Only assistant uses ADK Runner | **Limitation** | Other agents use direct function calls, not parallel LLM inference |
 | Depth is not patient gating | **Limitation** | No Z-buffer / distance filter to ignore background people; YOLO handles person detect |
 | `vision_sota.py` not in production | **Limitation** | RTMPose + YOLO11-seg + Depth V2 engine exists but is not wired to `main.py` |
 | Browser audio autoplay | **Limitation** | ElevenLabs MP3s generate correctly; playback can be blocked by browser policy (Web Speech API fallback exists) |
