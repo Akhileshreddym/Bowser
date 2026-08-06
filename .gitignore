@@ -12,7 +12,16 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Audio Outputs
-static/audio/*.mp3
+# Model weights (download at runtime)
+*.pt
+*.pth
+*.onnx
+*.joblib
+
+# Runtime / generated
 server.log
 *.log
+static/audio/*.mp3
+tmp/
+tmp_audio_test.py
+EXAMPLE_README.md
